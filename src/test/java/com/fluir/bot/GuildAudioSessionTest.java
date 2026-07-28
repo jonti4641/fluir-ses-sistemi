@@ -1,9 +1,8 @@
 package com.fluir.bot;
 
+import com.fluir.bot.audio.AudioPlayerManager;
 import com.fluir.bot.audio.GuildAudioSession;
 import com.fluir.bot.audio.VoiceConnectionState;
-import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
-import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
 
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
@@ -37,13 +36,13 @@ class GuildAudioSessionTest {
     @Mock private Member mockSelfMember;
     @Mock private AudioManager mockAudioManager;
 
-    private AudioPlayerManager lavaPlayerManager;
+    private AudioPlayerManager fluirAudioPlayerManager;
     private GuildAudioSession session;
 
     @BeforeEach
     void setUp() {
-        lavaPlayerManager = new DefaultAudioPlayerManager();
-        session = new GuildAudioSession(123456789L, lavaPlayerManager);
+        fluirAudioPlayerManager = new AudioPlayerManager();
+        session = fluirAudioPlayerManager.getOrCreateSession(mockGuild);
 
         lenient().when(mockGuild.getIdLong()).thenReturn(123456789L);
         lenient().when(mockGuild.getSelfMember()).thenReturn(mockSelfMember);

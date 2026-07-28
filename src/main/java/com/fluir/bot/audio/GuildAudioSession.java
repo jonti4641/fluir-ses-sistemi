@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -30,6 +31,8 @@ public class GuildAudioSession {
     private final TrackScheduler scheduler;
     private final AudioPlayerSendHandler sendHandler;
     private final ReentrantLock sessionLock = new ReentrantLock();
+    private final AtomicLong playbackGeneration = new AtomicLong(0);
+    private final MusicPlaybackService playbackService;
 
     private volatile VoiceConnectionState connectionState = VoiceConnectionState.DISCONNECTED;
     private volatile AudioChannel currentChannel;
@@ -38,18 +41,15 @@ public class GuildAudioSession {
     private volatile ScheduledFuture<?> aloneTimerTask;
     private volatile boolean isDestroyed = false;
 
-    public GuildAudioSession(long guildId, AudioPlayerManager lavaPlayerManager) {
+    public GuildAudioSession(long guildId, AudioPlayerManager lavaPlayerManager, MusicPlaybackService playbackService) {
         this.guildId = guildId;
         this.player = lavaPlayerManager.createPlayer();
+        this.playbackService = playbackService;
         this.scheduler = new TrackScheduler(this.player, this);
         this.player.addListener(this.scheduler);
         this.sendHandler = new AudioPlayerSendHandler(this.player);
     }
 
-    /**
-     * Bağlantı doğrulama ve merkezi ses kanalına katılım.
-     * Yarış durumlarını engelleyerek DISCONNECTED -> CONNECTING -> CONNECTED geçişlerini yönetir.
-     */
     public ConnectionResult ensureConnected(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel) {
         sessionLock.lock();
         try {
@@ -65,7 +65,6 @@ public class GuildAudioSession {
                 return new ConnectionResult(false, "❌ Lütfen öncelikle bir ses kanalına katılın!");
             }
 
-            // Zaten bağlı veya bağlanma aşamasında mı (iç durum takibi)
             if ((this.connectionState == VoiceConnectionState.CONNECTED || this.connectionState == VoiceConnectionState.CONNECTING)
                     && this.currentChannel != null && this.currentChannel.getIdLong() == targetChannel.getIdLong()) {
                 cancelIdleTimer();
@@ -73,7 +72,6 @@ public class GuildAudioSession {
                 return new ConnectionResult(true, "Zaten bağlı.");
             }
 
-            // Yetki kontrolleri (VIEW_CHANNEL, VOICE_CONNECT, VOICE_SPEAK)
             Member selfMember = guild.getSelfMember();
             if (!selfMember.hasPermission(targetChannel, Permission.VIEW_CHANNEL)) {
                 return new ConnectionResult(false, "❌ Kanalı görme iznim (`VIEW_CHANNEL`) yok: " + targetChannel.getName());
@@ -88,7 +86,6 @@ public class GuildAudioSession {
             AudioManager audioManager = guild.getAudioManager();
             AudioChannel connectedChannel = audioManager.getConnectedChannel();
 
-            // Zaten hedef kanala JDA tarafında bağlıysa
             if (connectedChannel != null && connectedChannel.getIdLong() == targetChannel.getIdLong()) {
                 this.currentChannel = targetChannel;
                 this.connectionState = VoiceConnectionState.CONNECTED;
@@ -97,12 +94,10 @@ public class GuildAudioSession {
                 return new ConnectionResult(true, "Zaten bağlı.");
             }
 
-            // Başka bir kanala bağlıysa ve bir şey çalıyorsa
             if (connectedChannel != null && player.getPlayingTrack() != null) {
                 return new ConnectionResult(false, "❌ Bot şu an `" + connectedChannel.getName() + "` kanalında aktif olarak müzik çalıyor!");
             }
 
-            // Bağlanma aşaması
             this.connectionState = VoiceConnectionState.CONNECTING;
             this.currentChannel = targetChannel;
 
@@ -204,6 +199,7 @@ public class GuildAudioSession {
     public void disconnect(Guild guild) {
         sessionLock.lock();
         try {
+            nextPlaybackGeneration();
             this.connectionState = VoiceConnectionState.DISCONNECTING;
             cancelIdleTimer();
             cancelAloneTimer();
@@ -245,6 +241,10 @@ public class GuildAudioSession {
     public GuildMessageChannel getLastMessageChannel() { return lastMessageChannel; }
     public void setLastMessageChannel(GuildMessageChannel messageChannel) { this.lastMessageChannel = messageChannel; }
     public boolean isDestroyed() { return isDestroyed; }
+
+    public long getPlaybackGeneration() { return playbackGeneration.get(); }
+    public long nextPlaybackGeneration() { return playbackGeneration.incrementAndGet(); }
+    public MusicPlaybackService getPlaybackService() { return playbackService; }
 
     public record ConnectionResult(boolean success, String message) {}
 }

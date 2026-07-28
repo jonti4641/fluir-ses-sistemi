@@ -18,6 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Parça sıralama ve event yönetimi sınıfı.
  * Race condition (çift parça atlama, takılma, hayalet eventler) engellenmiştir.
+ * Runtime fallback ve generation koruması desteklenir.
  */
 public class TrackScheduler extends AudioEventAdapter {
 
@@ -65,6 +66,7 @@ public class TrackScheduler extends AudioEventAdapter {
     public boolean nextTrack() {
         schedulerLock.lock();
         try {
+            session.nextPlaybackGeneration();
             AudioTrack next = queue.poll();
 
             if (next != null) {
@@ -86,12 +88,35 @@ public class TrackScheduler extends AudioEventAdapter {
     public void stop() {
         schedulerLock.lock();
         try {
+            session.nextPlaybackGeneration();
             isStopped.set(true);
             isHandlingException.set(false);
             queue.clear();
             currentTrack = null;
             player.stopTrack();
             logger.info("⏹️ [Guild: {}] Çalma durduruldu ve kuyruk temizlendi.", session.getGuildId());
+        } finally {
+            schedulerLock.unlock();
+        }
+    }
+
+    public void startFallbackTrack(AudioTrack fallbackTrack) {
+        schedulerLock.lock();
+        try {
+            if (isStopped.get()) return;
+            isHandlingException.set(false);
+            this.currentTrack = fallbackTrack;
+            player.startTrack(fallbackTrack, false);
+            logger.info("🔄 [Guild: {}] Fallback parçası başlatıldı: {}", session.getGuildId(), fallbackTrack.getInfo().title);
+        } finally {
+            schedulerLock.unlock();
+        }
+    }
+
+    public void advanceQueueAfterException() {
+        schedulerLock.lock();
+        try {
+            nextTrack();
         } finally {
             schedulerLock.unlock();
         }
@@ -109,7 +134,7 @@ public class TrackScheduler extends AudioEventAdapter {
             GuildMessageChannel announcementChannel = session.getLastMessageChannel();
             if (announcementChannel != null) {
                 announcementChannel.sendMessage(
-                        "🎵 **Şimdi çalıyor:** `" + track.getInfo().title + "`\n" +
+                        "🎵 **Parça başlatılıyor:** `" + track.getInfo().title + "`\n" +
                         "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + formatDuration(track.getDuration()) + "`"
                 ).queue(null, err -> logger.warn("Duyuru mesajı gönderilemedi: {}", err.getMessage()));
             }
@@ -128,16 +153,18 @@ public class TrackScheduler extends AudioEventAdapter {
                 return;
             }
 
-            // Exception handler tarafından zaten ilerletildiyse es geç
+            // Exception handler tarafından hallediliyorsa es geç
             if (isHandlingException.getAndSet(false)) {
-                logger.debug("Exception handler tarafından zaten işlendi, onTrackEnd es geçildi.");
+                logger.debug("Exception handler tarafından işleniyor, onTrackEnd es geçildi.");
                 return;
             }
 
             // Döngü kontrolü (Yalnızca FINISHED olan şarkılar için)
             if (loop && endReason == AudioTrackEndReason.FINISHED && currentTrack != null) {
                 logger.info("🔁 [Guild: {}] Döngü aktif, tekrar çalınıyor: {}", session.getGuildId(), track.getInfo().title);
-                player.startTrack(track.makeClone(), false);
+                AudioTrack cloned = track.makeClone();
+                cloned.setUserData(track.getUserData());
+                player.startTrack(cloned, false);
                 return;
             }
 
@@ -160,16 +187,19 @@ public class TrackScheduler extends AudioEventAdapter {
         try {
             logger.error("❌ [Guild: {}] Parça yürütme hatası [{}]: {}", session.getGuildId(), track.getInfo().title, exception.getMessage());
 
-            isHandlingException.set(true);
-
-            GuildMessageChannel announcementChannel = session.getLastMessageChannel();
-            if (announcementChannel != null) {
-                announcementChannel.sendMessage("❌ `" + track.getInfo().title + "` çalınırken bir hata oluştu: `" + exception.getMessage() + "`").queue(null, err -> logger.warn("Hata mesajı gönderilemedi: {}", err.getMessage()));
+            if (isHandlingException.getAndSet(true)) {
+                logger.debug("Zaten exception işleniyor, mükerrer çağrı es geçildi.");
+                return;
             }
-
-            nextTrack();
         } finally {
             schedulerLock.unlock();
+        }
+
+        // Asenkron runtime fallback çağrısı (Kilit dışında yapılır ki deadlock olmasın!)
+        if (session != null && session.getPlaybackService() != null) {
+            session.getPlaybackService().handleRuntimePlaybackFallback(session, track, exception);
+        } else {
+            advanceQueueAfterException();
         }
     }
 

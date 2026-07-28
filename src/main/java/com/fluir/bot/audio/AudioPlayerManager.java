@@ -37,15 +37,7 @@ public class AudioPlayerManager {
     }
 
     private void registerSources() {
-        // 1. SoundCloud
-        try {
-            playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
-            logger.info("✅ SoundCloud kaynağı kayıt edildi.");
-        } catch (Exception e) {
-            logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage(), e);
-        }
-
-        // 2. YouTube (Music + Web client)
+        // 1. Birincil Kaynak: YouTube (Music + Web client)
         try {
             YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(
                     true,
@@ -53,9 +45,17 @@ public class AudioPlayerManager {
                     new Web()
             );
             playerManager.registerSourceManager(youtube);
-            logger.info("✅ YouTube kaynağı kayıt edildi (Music + Web).");
+            logger.info("✅ YouTube kaynağı birincil olarak kayıt edildi (Music + Web).");
         } catch (Exception e) {
             logger.warn("⚠️ YouTube kaynağı yüklenemedi: {}", e.getMessage());
+        }
+
+        // 2. İkincil Kaynak: SoundCloud
+        try {
+            playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
+            logger.info("✅ SoundCloud kaynağı ikincil olarak kayıt edildi.");
+        } catch (Exception e) {
+            logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage(), e);
         }
 
         // 3. Diğer kaynaklar
@@ -69,7 +69,7 @@ public class AudioPlayerManager {
     }
 
     public GuildAudioSession getOrCreateSession(Guild guild) {
-        return sessions.computeIfAbsent(guild.getIdLong(), id -> new GuildAudioSession(id, playerManager));
+        return sessions.computeIfAbsent(guild.getIdLong(), id -> new GuildAudioSession(id, playerManager, playbackService));
     }
 
     public GuildAudioSession getSession(long guildId) {
