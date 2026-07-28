@@ -12,7 +12,6 @@ import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
-import dev.lavalink.youtube.clients.AndroidLite;
 import dev.lavalink.youtube.clients.Music;
 import dev.lavalink.youtube.clients.Web;
 import net.dv8tion.jda.api.entities.Guild;
@@ -40,14 +39,11 @@ public class AudioPlayerManager {
 
     private void registerSources() {
         try {
-            // ✅ YouTube — AndroidLite ve Music client kullan
-            // WEB_EMBEDDED_PLAYER KULLANILMIYOR (SignatureCipher hatası verir)
-            // AndroidLite: cipher gerektirmez, Innertube API kullanır
-            // Music: YouTube Music için
-            // Web: Fallback
+            // ✅ YouTube — Music + Web client kullan (AndroidLite bu versiyonda yok)
+            // Music: YouTube Music API kullanır, cipher gerektirmez
+            // Web: Standart YouTube, fallback
             YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(
-                    true,           // allowSearch
-                    new AndroidLite(),
+                    true,
                     new Music(),
                     new Web()
             );
