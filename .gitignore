@@ -1,0 +1,52 @@
+# .gitignore - Java Discord Bot
+
+# ========================
+# GÜVENLİK - Asla commit etme!
+# ========================
+.env
+*.env
+secrets.properties
+
+# ========================
+# Java / Maven
+# ========================
+target/
+*.class
+*.jar
+!app.jar
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# ========================
+# IDE Dosyaları
+# ========================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.eclipse
+.settings/
+.project
+.classpath
+.factorypath
+
+# ========================
+# İşletim Sistemi
+# ========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================
+# Loglar
+# ========================
+logs/
+*.log
+
+# ========================
+# Railway
+# ========================
+.railway/
+railway.toml
