@@ -1,6 +1,7 @@
 package com.fluir.bot;
 
 import com.fluir.bot.audio.AudioPlayerManager;
+import com.fluir.bot.audio.VoiceUpdateListener;
 import com.fluir.bot.commands.CommandManager;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
@@ -23,7 +24,6 @@ public class FluirBot {
         logger.info("   🎵 Fluir Ses Sistemi Başlatılıyor   ");
         logger.info("========================================");
 
-        // Token yükle
         String token = loadToken();
         if (token == null) {
             logger.error("❌ DISCORD_TOKEN bulunamadı! .env veya ortam değişkeni gerekli.");
@@ -31,13 +31,12 @@ public class FluirBot {
         }
 
         try {
-            // Ses motoru başlat
-            logger.info("⚙️ Ses motoru başlatılıyor...");
+            logger.info("⚙️ Ses motoru ve oturum yöneticisi başlatılıyor...");
             audioPlayerManager = new AudioPlayerManager();
 
-            // JDA başlat
             logger.info("⚙️ JDA başlatılıyor...");
             CommandManager commandManager = new CommandManager(audioPlayerManager);
+            VoiceUpdateListener voiceUpdateListener = new VoiceUpdateListener(audioPlayerManager);
 
             jda = JDABuilder.createDefault(token)
                     .setActivity(Activity.listening("🎵 /yardim"))
@@ -49,7 +48,7 @@ public class FluirBot {
                     )
                     .setMemberCachePolicy(MemberCachePolicy.VOICE)
                     .enableCache(CacheFlag.VOICE_STATE)
-                    .addEventListeners(commandManager)
+                    .addEventListeners(commandManager, voiceUpdateListener)
                     .build()
                     .awaitReady();
 
@@ -57,6 +56,9 @@ public class FluirBot {
 
             // Slash komutlarını kaydet
             CommandManager.registerSlashCommands(jda);
+
+            // Controlled Shutdown Hook
+            registerShutdownHook();
 
             logger.info("========================================");
             logger.info("   ✅ Fluir Ses Sistemi HAZIR!          ");
@@ -68,15 +70,30 @@ public class FluirBot {
         }
     }
 
+    private static void registerShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("🛑 Kapanış sinyali alındı. Kontrollü shutdown başlatılıyor...");
+            try {
+                if (audioPlayerManager != null) {
+                    audioPlayerManager.shutdown();
+                }
+                if (jda != null) {
+                    jda.shutdown();
+                }
+                logger.info("✅ Kontrollü shutdown başarıyla tamamlandı.");
+            } catch (Exception e) {
+                logger.error("Kapanış sırasında hata: {}", e.getMessage(), e);
+            }
+        }, "FluirBot-ShutdownHook"));
+    }
+
     private static String loadToken() {
-        // Önce ortam değişkeni (Railway, Docker)
         String token = System.getenv("DISCORD_TOKEN");
         if (token != null && !token.isBlank()) {
             logger.info("✅ Token ortam değişkeninden alındı.");
             return token;
         }
 
-        // Yoksa .env dosyasından
         try {
             Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
             token = dotenv.get("DISCORD_TOKEN");
