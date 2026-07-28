@@ -18,6 +18,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jda.version>5.2.1</jda.version>
         <lavaplayer.version>2.2.2</lavaplayer.version>
+        <youtube.source.version>1.13.0</youtube.source.version>
     </properties>
 
     <repositories>
@@ -36,6 +37,10 @@
         <repository>
             <id>sonatype-snapshots</id>
             <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+        </repository>
+        <repository>
+            <id>lavalink-releases</id>
+            <url>https://maven.lavalink.dev/releases</url>
         </repository>
     </repositories>
 
@@ -58,6 +63,13 @@
             <groupId>dev.arbjerg</groupId>
             <artifactId>lavaplayer</artifactId>
             <version>${lavaplayer.version}</version>
+        </dependency>
+
+        <!-- YouTube Source - LavaPlayer için güncel YouTube desteği -->
+        <dependency>
+            <groupId>dev.lavalink.youtube</groupId>
+            <artifactId>v2</artifactId>
+            <version>${youtube.source.version}</version>
         </dependency>
 
         <!-- Opus ses codec -->

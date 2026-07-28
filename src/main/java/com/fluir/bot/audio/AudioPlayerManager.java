@@ -6,6 +6,7 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import dev.lavalink.youtube.YoutubeAudioSourceManager;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
@@ -18,6 +19,7 @@ import java.util.Map;
 
 /**
  * Tüm sunucuların ses yöneticilerini ve LavaPlayer'ı yöneten ana sınıf.
+ * YouTube için dev.lavalink.youtube:v2 kullanır (LavaPlayer'ın dahili YT desteği bozuk).
  */
 public class AudioPlayerManager {
 
@@ -30,11 +32,19 @@ public class AudioPlayerManager {
         this.playerManager = new DefaultAudioPlayerManager();
         this.guildAudioManagers = new HashMap<>();
 
-        // Tüm ses kaynaklarını etkinleştir (YouTube, SoundCloud, Twitch, vb.)
-        AudioSourceManagers.registerRemoteSources(playerManager);
+        // ✅ Güncel YouTube kaynağı — dahili YT desteği YERİNE bunu kullan
+        YoutubeAudioSourceManager ytSourceManager = new YoutubeAudioSourceManager();
+        playerManager.registerSourceManager(ytSourceManager);
+
+        // Diğer kaynaklar: SoundCloud, Twitch, Vimeo, Bandcamp, HTTP...
+        // YouTube'u manuel kaydettiğimiz için registerRemoteSources'tan çıkarıyoruz
+        AudioSourceManagers.registerRemoteSources(playerManager,
+                com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeAudioSourceManager.class);
+
+        // Yerel dosya desteği
         AudioSourceManagers.registerLocalSource(playerManager);
 
-        logger.info("🎵 AudioPlayerManager başlatıldı - Tüm kaynaklar aktif.");
+        logger.info("🎵 AudioPlayerManager başlatıldı — YouTube v2 kaynağı aktif.");
     }
 
     /**
@@ -54,13 +64,12 @@ public class AudioPlayerManager {
     }
 
     /**
-     * Ses kanalına bağlanır ve parçayı yükler/çalar.
+     * Parçayı yükler ve çalar (TextChannel mesaj versiyonu — prefix komutlar için).
      */
     public void loadAndPlay(Guild guild, TextChannel textChannel, VoiceChannel voiceChannel, String trackUrl) {
         GuildAudioManager manager = getGuildAudioManager(guild);
         manager.scheduler.setAnnouncementChannel(textChannel);
 
-        // Ses kanalına bağlan
         AudioManager audioManager = guild.getAudioManager();
         if (!audioManager.isConnected()) {
             audioManager.openAudioConnection(voiceChannel);
@@ -79,14 +88,13 @@ public class AudioPlayerManager {
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (playlist.isSearchResult()) {
-                    // Arama sonucu - ilk parçayı al
                     AudioTrack track = playlist.getTracks().get(0);
                     logger.info("🔍 Arama sonucu: {}", track.getInfo().title);
-                    textChannel.sendMessage("🔍 Bulunan parça: **" + track.getInfo().title + "**").queue();
+                    textChannel.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**").queue();
                     manager.scheduler.queue(track);
                 } else {
-                    // Çalma listesi
-                    textChannel.sendMessage("📃 **" + playlist.getName() + "** çalma listesi yükleniyor! (" + playlist.getTracks().size() + " parça)").queue();
+                    textChannel.sendMessage("📃 **" + playlist.getName() + "** — `" +
+                            playlist.getTracks().size() + "` parça eklendi!").queue();
                     for (AudioTrack track : playlist.getTracks()) {
                         manager.scheduler.queue(track);
                     }
@@ -95,13 +103,13 @@ public class AudioPlayerManager {
 
             @Override
             public void noMatches() {
-                textChannel.sendMessage("❌ **\"" + trackUrl + "\"** için sonuç bulunamadı!").queue();
+                textChannel.sendMessage("❌ **\"" + trackUrl.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
                 logger.warn("Sonuç bulunamadı: {}", trackUrl);
             }
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                textChannel.sendMessage("❌ Parça yüklenirken hata: **" + exception.getMessage() + "**").queue();
+                textChannel.sendMessage("❌ Yükleme hatası: **" + exception.getMessage() + "**").queue();
                 logger.error("Parça yükleme hatası: {}", exception.getMessage());
             }
         });
