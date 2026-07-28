@@ -1,7 +1,7 @@
 package com.fluir.bot;
 
-import com.fluir.bot.commands.CommandManager;
 import com.fluir.bot.audio.AudioPlayerManager;
+import com.fluir.bot.commands.CommandManager;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -18,47 +18,76 @@ public class FluirBot {
     public static JDA jda;
     public static AudioPlayerManager audioPlayerManager;
 
-    public static void main(String[] args) throws Exception {
-        logger.info("🎵 Fluir Ses Sistemi başlatılıyor...");
+    public static void main(String[] args) {
+        logger.info("========================================");
+        logger.info("   🎵 Fluir Ses Sistemi Başlatılıyor   ");
+        logger.info("========================================");
 
-        // Token yükle - önce env var, yoksa .env dosyası
-        String token = System.getenv("DISCORD_TOKEN");
-        if (token == null || token.isEmpty()) {
-            try {
-                Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
-                token = dotenv.get("DISCORD_TOKEN");
-            } catch (Exception e) {
-                logger.warn(".env dosyası bulunamadı, ortam değişkeni kullanılıyor.");
-            }
-        }
-
-        if (token == null || token.isEmpty()) {
-            logger.error("❌ DISCORD_TOKEN bulunamadı! Lütfen ortam değişkenini veya .env dosyasını ayarlayın.");
+        // Token yükle
+        String token = loadToken();
+        if (token == null) {
+            logger.error("❌ DISCORD_TOKEN bulunamadı! .env veya ortam değişkeni gerekli.");
             System.exit(1);
         }
 
-        // Ses yöneticisini başlat
-        audioPlayerManager = new AudioPlayerManager();
+        try {
+            // Ses motoru başlat
+            logger.info("⚙️ Ses motoru başlatılıyor...");
+            audioPlayerManager = new AudioPlayerManager();
 
-        // JDA bot başlat
-        jda = JDABuilder.createDefault(token)
-                .setActivity(Activity.listening("🎵 /yardım"))
-                .enableIntents(
-                        GatewayIntent.GUILD_MESSAGES,
-                        GatewayIntent.MESSAGE_CONTENT,
-                        GatewayIntent.GUILD_VOICE_STATES,
-                        GatewayIntent.GUILD_MEMBERS
-                )
-                .setMemberCachePolicy(MemberCachePolicy.VOICE)
-                .enableCache(CacheFlag.VOICE_STATE)
-                .addEventListeners(new CommandManager(audioPlayerManager))
-                .build()
-                .awaitReady();
+            // JDA başlat
+            logger.info("⚙️ JDA başlatılıyor...");
+            CommandManager commandManager = new CommandManager(audioPlayerManager);
 
-        logger.info("✅ Fluir Ses Sistemi hazır! {} sunucuda aktif.", jda.getGuilds().size());
+            jda = JDABuilder.createDefault(token)
+                    .setActivity(Activity.listening("🎵 /yardim"))
+                    .enableIntents(
+                            GatewayIntent.GUILD_MESSAGES,
+                            GatewayIntent.MESSAGE_CONTENT,
+                            GatewayIntent.GUILD_VOICE_STATES,
+                            GatewayIntent.GUILD_MEMBERS
+                    )
+                    .setMemberCachePolicy(MemberCachePolicy.VOICE)
+                    .enableCache(CacheFlag.VOICE_STATE)
+                    .addEventListeners(commandManager)
+                    .build()
+                    .awaitReady();
 
-        // Slash komutlarını kaydet
-        CommandManager.registerSlashCommands(jda);
-        logger.info("📋 Slash komutları kaydedildi.");
+            logger.info("✅ JDA hazır! {} sunucuda aktif.", jda.getGuilds().size());
+
+            // Slash komutlarını kaydet
+            CommandManager.registerSlashCommands(jda);
+
+            logger.info("========================================");
+            logger.info("   ✅ Fluir Ses Sistemi HAZIR!          ");
+            logger.info("========================================");
+
+        } catch (Exception e) {
+            logger.error("❌ Bot başlatılırken kritik hata: {}", e.getMessage(), e);
+            System.exit(1);
+        }
+    }
+
+    private static String loadToken() {
+        // Önce ortam değişkeni (Railway, Docker)
+        String token = System.getenv("DISCORD_TOKEN");
+        if (token != null && !token.isBlank()) {
+            logger.info("✅ Token ortam değişkeninden alındı.");
+            return token;
+        }
+
+        // Yoksa .env dosyasından
+        try {
+            Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+            token = dotenv.get("DISCORD_TOKEN");
+            if (token != null && !token.isBlank()) {
+                logger.info("✅ Token .env dosyasından alındı.");
+                return token;
+            }
+        } catch (Exception e) {
+            logger.warn(".env dosyası yüklenemedi: {}", e.getMessage());
+        }
+
+        return null;
     }
 }

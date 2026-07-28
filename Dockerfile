@@ -1,34 +1,44 @@
-# Dockerfile - Railway için optimize edilmiş
-FROM eclipse-temurin:17-jdk-alpine AS builder
-
-# Maven yükle
-RUN apk add --no-cache maven
+# ==============================================
+# AŞAMA 1: BUILD - Maven ile derle (Debian tabanlı)
+# ==============================================
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 
-# Bağımlılıkları önce kopyala (Docker cache için)
+# Önce sadece pom.xml kopyala (bağımlılık cache)
 COPY pom.xml .
-RUN mvn dependency:go-offline -B
+RUN mvn dependency:go-offline -B --no-transfer-progress
 
 # Kaynak kodu kopyala ve derle
 COPY src ./src
-RUN mvn package -DskipTests -B
+RUN mvn package -DskipTests -B --no-transfer-progress
 
-# ========================
-# Runtime aşaması
-# ========================
-FROM eclipse-temurin:17-jre-alpine
+# ==============================================
+# AŞAMA 2: RUNTIME - Debian tabanlı JRE (musl değil, glibc!)
+# ==============================================
+FROM eclipse-temurin:17-jre-jammy
 
-# FFmpeg yükle (ses işleme için gerekli)
-RUN apk add --no-cache ffmpeg opus-dev
+# FFmpeg, Opus ve gerekli native kütüphaneler (glibc ile tam uyumlu)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libopus0 \
+    libopus-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Derlenmiş JAR'ı kopyala
+# Derlenmiş FAT JAR'ı kopyala
 COPY --from=builder /app/target/fluir-ses-sistemi-1.0.0.jar app.jar
 
-# Logs dizini oluştur
+# Log dizini
 RUN mkdir -p logs
 
-# Bot çalıştır
-CMD ["java", "-Xmx512m", "-Xms256m", "-jar", "app.jar"]
+# JVM ayarları: gc log yok, bellek sınırı, düzgün kapanma
+ENTRYPOINT ["java", \
+    "-Xmx450m", \
+    "-Xms128m", \
+    "-XX:+UseG1GC", \
+    "-XX:MaxGCPauseMillis=100", \
+    "-Dfile.encoding=UTF-8", \
+    "-jar", "app.jar"]
