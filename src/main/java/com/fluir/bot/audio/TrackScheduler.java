@@ -6,7 +6,7 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,7 +106,7 @@ public class TrackScheduler extends AudioEventAdapter {
             session.cancelIdleTimer();
             logger.info("▶️ [Guild: {}] Çalıyor: {}", session.getGuildId(), track.getInfo().title);
 
-            TextChannel announcementChannel = session.getLastTextChannel();
+            GuildMessageChannel announcementChannel = session.getLastMessageChannel();
             if (announcementChannel != null) {
                 announcementChannel.sendMessage(
                         "🎵 **Şimdi çalıyor:** `" + track.getInfo().title + "`\n" +
@@ -144,11 +144,9 @@ public class TrackScheduler extends AudioEventAdapter {
             if (endReason.mayStartNext) {
                 boolean hasNext = nextTrack();
                 if (!hasNext && queue.isEmpty()) {
-                    TextChannel textChannel = session.getLastTextChannel();
-                    if (textChannel != null) {
-                        Guild guild = textChannel.getGuild();
-                        session.scheduleIdleTimer(guild, 90);
-                    }
+                    GuildMessageChannel messageChannel = session.getLastMessageChannel();
+                    Guild guild = messageChannel != null ? messageChannel.getGuild() : null;
+                    session.scheduleIdleTimer(guild, 90);
                 }
             }
         } finally {
@@ -164,9 +162,9 @@ public class TrackScheduler extends AudioEventAdapter {
 
             isHandlingException.set(true);
 
-            TextChannel announcementChannel = session.getLastTextChannel();
+            GuildMessageChannel announcementChannel = session.getLastMessageChannel();
             if (announcementChannel != null) {
-                announcementChannel.sendMessage("❌ `" + track.getInfo().title + "` çalınırken bir hata oluştu: `" + exception.getMessage() + "`").queue();
+                announcementChannel.sendMessage("❌ `" + track.getInfo().title + "` çalınırken bir hata oluştu: `" + exception.getMessage() + "`").queue(null, err -> logger.warn("Hata mesajı gönderilemedi: {}", err.getMessage()));
             }
 
             nextTrack();

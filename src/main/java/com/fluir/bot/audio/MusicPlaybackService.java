@@ -6,8 +6,8 @@ import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import org.slf4j.Logger;
@@ -36,7 +36,7 @@ public class MusicPlaybackService {
     /**
      * Slash veya doğrudan yanıt ortamı için müzik arama ve oynatma.
      */
-    public void processPlayRequest(Guild guild, AudioChannel targetChannel, TextChannel textChannel, InteractionHook hook, String rawQuery, boolean isFallback) {
+    public void processPlayRequest(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel, InteractionHook hook, String rawQuery, boolean isFallback) {
         String processedQuery = rawQuery.trim();
 
         // 1. Spotify URL kontrolü
@@ -55,7 +55,9 @@ public class MusicPlaybackService {
 
         final String finalQuery = processedQuery;
         GuildAudioSession session = audioPlayerManager.getOrCreateSession(guild);
-        session.setLastTextChannel(textChannel);
+        if (messageChannel != null) {
+            session.setLastMessageChannel(messageChannel);
+        }
 
         // ÖNEMLİ: Kanala HIZLICA doğrudan BAĞLANMA! Önce parçayı güvenle yükle!
         audioPlayerManager.getPlayerManager().loadItemOrdered(session, finalQuery, new AudioLoadResultHandler() {
@@ -63,19 +65,19 @@ public class MusicPlaybackService {
             @Override
             public void trackLoaded(AudioTrack track) {
                 if (AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
-                    sendResponse(hook, textChannel, "⚠️ **\"" + track.getInfo().title + "\"** (film/dizi/fragman) filtrelendi ve engellendi.");
+                    sendResponse(hook, messageChannel, "⚠️ **\"" + track.getInfo().title + "\"** (film/dizi/fragman) filtrelendi ve engellendi.");
                     return;
                 }
 
                 // Parça hazır! Şimdi güvenli biçimde bağlan
-                GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, textChannel);
+                GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, messageChannel);
                 if (!connResult.success()) {
-                    sendResponse(hook, textChannel, connResult.message());
+                    sendResponse(hook, messageChannel, connResult.message());
                     return;
                 }
 
                 session.getScheduler().queue(track);
-                sendResponse(hook, textChannel, "✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
+                sendResponse(hook, messageChannel, "✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
                         "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`");
             }
 
@@ -91,30 +93,32 @@ public class MusicPlaybackService {
                     }
 
                     if (validTracks.isEmpty()) {
-                        sendResponse(hook, textChannel, "⚠️ Arama sonuçlarındaki tüm içerikler film/dizi/fragman olduğu için filtrelendi.");
+                        sendResponse(hook, messageChannel, "⚠️ Arama sonuçlarındaki tüm içerikler film/dizi/fragman olduğu için filtrelendi.");
                         return;
                     }
 
                     if (validTracks.size() == 1 || isUrl) {
                         AudioTrack singleTrack = validTracks.get(0);
-                        GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, textChannel);
+                        GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, messageChannel);
                         if (!connResult.success()) {
-                            sendResponse(hook, textChannel, connResult.message());
+                            sendResponse(hook, messageChannel, connResult.message());
                             return;
                         }
                         session.getScheduler().queue(singleTrack);
-                        sendResponse(hook, textChannel, "🎵 Çalınıyor: **" + singleTrack.getInfo().title + "**");
+                        sendResponse(hook, messageChannel, "🎵 Çalınıyor: **" + singleTrack.getInfo().title + "**");
                         return;
                     }
 
                     // Arama Paneli Sun
-                    sendSearchPanel(hook, textChannel, rawQuery, validTracks, hook != null ? hook.getInteraction().getUser().getIdLong() : 0, guild.getIdLong(), textChannel.getIdLong());
+                    long channelId = messageChannel != null ? messageChannel.getIdLong() : 0L;
+                    long userId = hook != null ? hook.getInteraction().getUser().getIdLong() : 0L;
+                    sendSearchPanel(hook, messageChannel, rawQuery, validTracks, userId, guild.getIdLong(), channelId);
 
                 } else {
                     // Normal Playlist (Max 100 parça sınırı)
-                    GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, textChannel);
+                    GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, targetChannel, messageChannel);
                     if (!connResult.success()) {
-                        sendResponse(hook, textChannel, connResult.message());
+                        sendResponse(hook, messageChannel, connResult.message());
                         return;
                     }
 
@@ -127,7 +131,7 @@ public class MusicPlaybackService {
                         }
                     }
 
-                    sendResponse(hook, textChannel, "📃 **" + playlist.getName() + "** — `" + addedCount + "` parça eklendi.");
+                    sendResponse(hook, messageChannel, "📃 **" + playlist.getName() + "** — `" + addedCount + "` parça eklendi.");
                 }
             }
 
@@ -137,11 +141,11 @@ public class MusicPlaybackService {
                 if (!isFallback && finalQuery.startsWith("scsearch:")) {
                     String fallbackQuery = "ytsearch:" + rawQuery;
                     logger.info("🔄 [Guild: {}] SoundCloud eşleşmedi. YouTube fallback deneniyor: {}", guild.getId(), fallbackQuery);
-                    processPlayRequest(guild, targetChannel, textChannel, hook, fallbackQuery, true);
+                    processPlayRequest(guild, targetChannel, messageChannel, hook, fallbackQuery, true);
                     return;
                 }
 
-                sendResponse(hook, textChannel, "❌ **\"" + rawQuery + "\"** için sonuç bulunamadı.");
+                sendResponse(hook, messageChannel, "❌ **\"" + rawQuery + "\"** için sonuç bulunamadı.");
             }
 
             @Override
@@ -151,16 +155,16 @@ public class MusicPlaybackService {
                 if (!isFallback && finalQuery.startsWith("scsearch:")) {
                     String fallbackQuery = "ytsearch:" + rawQuery;
                     logger.info("🔄 [Guild: {}] SoundCloud hatası. YouTube fallback deneniyor: {}", guild.getId(), fallbackQuery);
-                    processPlayRequest(guild, targetChannel, textChannel, hook, fallbackQuery, true);
+                    processPlayRequest(guild, targetChannel, messageChannel, hook, fallbackQuery, true);
                     return;
                 }
 
-                sendResponse(hook, textChannel, "❌ **Yükleme başarısız:** `" + exception.getMessage() + "`");
+                sendResponse(hook, messageChannel, "❌ **Yükleme başarısız:** `" + exception.getMessage() + "`");
             }
         });
     }
 
-    private void sendSearchPanel(InteractionHook hook, TextChannel textChannel, String query, List<AudioTrack> tracks, long userId, long guildId, long channelId) {
+    private void sendSearchPanel(InteractionHook hook, GuildMessageChannel messageChannel, String query, List<AudioTrack> tracks, long userId, long guildId, long channelId) {
         String customId = "song_select:" + UUID.randomUUID().toString().substring(0, 8);
         SearchPanelCache.put(customId, userId, guildId, channelId, tracks);
 
@@ -186,16 +190,16 @@ public class MusicPlaybackService {
 
         if (hook != null) {
             hook.sendMessageEmbeds(eb.build()).addActionRow(menuBuilder.build()).queue();
-        } else if (textChannel != null) {
-            textChannel.sendMessageEmbeds(eb.build()).setActionRow(menuBuilder.build()).queue();
+        } else if (messageChannel != null) {
+            messageChannel.sendMessageEmbeds(eb.build()).setActionRow(menuBuilder.build()).queue();
         }
     }
 
-    private void sendResponse(InteractionHook hook, TextChannel textChannel, String message) {
+    private void sendResponse(InteractionHook hook, GuildMessageChannel messageChannel, String message) {
         if (hook != null) {
             hook.sendMessage(message).queue(null, err -> logger.warn("Hook mesaj hatası: {}", err.getMessage()));
-        } else if (textChannel != null) {
-            textChannel.sendMessage(message).queue(null, err -> logger.warn("TextChannel mesaj hatası: {}", err.getMessage()));
+        } else if (messageChannel != null) {
+            messageChannel.sendMessage(message).queue(null, err -> logger.warn("MessageChannel mesaj hatası: {}", err.getMessage()));
         }
     }
 }

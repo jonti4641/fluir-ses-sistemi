@@ -6,8 +6,8 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -27,6 +27,7 @@ import java.util.Queue;
 
 /**
  * Slash komutlar, prefix komutlar ve dropdown seçim etkileşimlerini yöneten listener.
+ * Hem metin kanallarını hem de ses kanalı yerleşik yazı sohbetlerini (GuildMessageChannel) destekler.
  */
 public class CommandManager extends ListenerAdapter {
 
@@ -88,6 +89,8 @@ public class CommandManager extends ListenerAdapter {
             logger.error("Slash komut hatası [{}]: {}", event.getName(), e.getMessage(), e);
             if (!event.isAcknowledged()) {
                 event.reply("❌ İşlem sırasında bir hata oluştu: " + e.getMessage()).setEphemeral(true).queue();
+            } else {
+                event.getHook().sendMessage("❌ İşlem sırasında bir hata oluştu: " + e.getMessage()).queue();
             }
         }
     }
@@ -115,7 +118,8 @@ public class CommandManager extends ListenerAdapter {
                 return;
             }
 
-            AudioChannel userChannel = getUserAudioChannel(member, null);
+            GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+            AudioChannel userChannel = getUserAudioChannel(member, messageChannel);
             if (userChannel == null) {
                 event.reply("❌ Bir ses kanalına bağlı olmalısın!").setEphemeral(true).queue();
                 return;
@@ -137,7 +141,7 @@ public class CommandManager extends ListenerAdapter {
             AudioTrack chosenTrack = tracks.get(index);
             GuildAudioSession session = audioPlayerManager.getOrCreateSession(guild);
 
-            GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, userChannel, event.getChannel().asTextChannel());
+            GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, userChannel, messageChannel);
             if (!connResult.success()) {
                 event.reply(connResult.message()).setEphemeral(true).queue();
                 return;
@@ -168,64 +172,67 @@ public class CommandManager extends ListenerAdapter {
         String msg = event.getMessage().getContentRaw();
         if (!msg.startsWith(PREFIX)) return;
 
+        if (!(event.getChannel() instanceof GuildMessageChannel messageChannel)) {
+            return;
+        }
+
         String[] parts = msg.substring(PREFIX.length()).trim().split("\\s+", 2);
         String cmd  = parts[0].toLowerCase();
         String args = parts.length > 1 ? parts[1] : "";
 
-        Guild       guild   = event.getGuild();
-        TextChannel channel = event.getChannel().asTextChannel();
-        Member      member  = event.getMember();
+        Guild  guild  = event.getGuild();
+        Member member = event.getMember();
 
         try {
             switch (cmd) {
                 case "çal", "cal", "play", "p" -> {
-                    if (args.isEmpty()) { channel.sendMessage("❌ Kullanım: `!çal <şarkı adı veya URL>`").queue(); return; }
-                    AudioChannel vc = getUserAudioChannel(member, channel);
+                    if (args.isEmpty()) { messageChannel.sendMessage("❌ Kullanım: `!çal <şarkı adı veya URL>`").queue(); return; }
+                    AudioChannel vc = getUserAudioChannel(member, messageChannel);
                     if (vc == null) return;
-                    audioPlayerManager.getPlaybackService().processPlayRequest(guild, vc, channel, null, args, false);
+                    audioPlayerManager.getPlaybackService().processPlayRequest(guild, vc, messageChannel, null, args, false);
                 }
                 case "dur", "pause" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
                     boolean p = !s.getPlayer().isPaused();
                     s.getPlayer().setPaused(p);
-                    channel.sendMessage(p ? "⏸️ Duraklatıldı." : "▶️ Devam ediyor.").queue();
+                    messageChannel.sendMessage(p ? "⏸️ Duraklatıldı." : "▶️ Devam ediyor.").queue();
                 }
                 case "atla", "skip", "s" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
                     s.getScheduler().nextTrack();
-                    channel.sendMessage("⏭️ Sonraki parçaya geçildi.").queue();
+                    messageChannel.sendMessage("⏭️ Sonraki parçaya geçildi.").queue();
                 }
                 case "durdur", "stop" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     audioPlayerManager.disconnect(guild);
-                    channel.sendMessage("⏹️ Durduruldu ve ses kanalından çıkıldı.").queue();
+                    messageChannel.sendMessage("⏹️ Durduruldu ve ses kanalından çıkıldı.").queue();
                 }
                 case "ses", "volume", "v" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     try {
                         int v = Integer.parseInt(args);
-                        if (v < 0 || v > 150) { channel.sendMessage("❌ Ses 0–150 arasında olmalı!").queue(); return; }
+                        if (v < 0 || v > 150) { messageChannel.sendMessage("❌ Ses 0–150 arasında olmalı!").queue(); return; }
                         GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
                         s.getPlayer().setVolume(v);
-                        channel.sendMessage("🔊 Ses **" + v + "%** ayarlandı.").queue();
-                    } catch (NumberFormatException e) { channel.sendMessage("❌ Kullanım: `!ses <0-150>`").queue(); }
+                        messageChannel.sendMessage("🔊 Ses **" + v + "%** ayarlandı.").queue();
+                    } catch (NumberFormatException e) { messageChannel.sendMessage("❌ Kullanım: `!ses <0-150>`").queue(); }
                 }
                 case "döngü", "loop" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
                     boolean l = !s.getScheduler().isLoop();
                     s.getScheduler().setLoop(l);
-                    channel.sendMessage(l ? "🔁 Döngü **açık**." : "➡️ Döngü **kapalı**.").queue();
+                    messageChannel.sendMessage(l ? "🔁 Döngü **açık**." : "➡️ Döngü **kapalı**.").queue();
                 }
                 case "temizle", "clear" -> {
-                    if (!validateControlPermissions(member, guild, channel, null)) return;
+                    if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
                     s.getScheduler().getQueue().clear();
-                    channel.sendMessage("🗑️ Kuyruk temizlendi.").queue();
+                    messageChannel.sendMessage("🗑️ Kuyruk temizlendi.").queue();
                 }
-                case "yardim", "yardım", "help", "h" -> channel.sendMessageEmbeds(buildHelpEmbed().build()).queue();
+                case "yardim", "yardım", "help", "h" -> messageChannel.sendMessageEmbeds(buildHelpEmbed().build()).queue();
             }
         } catch (Exception e) {
             logger.error("Prefix komut hatası [!{}]: {}", cmd, e.getMessage(), e);
@@ -235,7 +242,11 @@ public class CommandManager extends ListenerAdapter {
     private void handlePlaySlash(SlashCommandInteractionEvent event) {
         Member member = event.getMember();
         Guild guild = event.getGuild();
-        TextChannel textChannel = event.getChannel().asTextChannel();
+
+        if (!(event.getChannel() instanceof GuildMessageChannel messageChannel)) {
+            event.reply("❌ Bu kanal üzerinden komut yanıtı gönderilemiyor.").setEphemeral(true).queue();
+            return;
+        }
 
         AudioChannel vc = getUserAudioChannel(member, null);
         if (vc == null) {
@@ -245,12 +256,13 @@ public class CommandManager extends ListenerAdapter {
 
         event.deferReply().queue();
         String rawQuery = event.getOption("sorgu").getAsString().trim();
-        audioPlayerManager.getPlaybackService().processPlayRequest(guild, vc, textChannel, event.getHook(), rawQuery, false);
+        audioPlayerManager.getPlaybackService().processPlayRequest(guild, vc, messageChannel, event.getHook(), rawQuery, false);
     }
 
     private void handlePauseSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
         if (s.getPlayer().getPlayingTrack() == null) {
             event.getHook().sendMessage("❌ Şu an hiçbir şey çalmıyor!").queue();
@@ -263,7 +275,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleSkipSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
         if (s.getPlayer().getPlayingTrack() == null) {
             event.getHook().sendMessage("❌ Atlanacak parça yok!").queue();
@@ -275,7 +288,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleStopSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         audioPlayerManager.disconnect(event.getGuild());
         event.getHook().sendMessage("⏹️ **Durduruldu ve ses kanalından çıkıldı.**").queue();
     }
@@ -315,7 +329,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleLoopSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
         boolean l = !s.getScheduler().isLoop();
         s.getScheduler().setLoop(l);
@@ -324,7 +339,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleVolumeSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         int vol = (int) event.getOption("seviye").getAsLong();
         if (vol < 0 || vol > 150) {
             event.getHook().sendMessage("❌ Ses 0–150 arasında olmalıdır!").queue();
@@ -360,7 +376,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleShuffleSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
         List<AudioTrack> list = new ArrayList<>(s.getScheduler().getQueue());
         Collections.shuffle(list);
@@ -371,7 +388,8 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleClearSlash(SlashCommandInteractionEvent event) {
         event.deferReply().queue();
-        if (!validateControlPermissions(event.getMember(), event.getGuild(), null, event.getHook())) return;
+        GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
+        if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
         s.getScheduler().getQueue().clear();
         event.getHook().sendMessage("🗑️ **Kuyruk temizlendi.**").queue();
@@ -381,39 +399,36 @@ public class CommandManager extends ListenerAdapter {
         event.replyEmbeds(buildHelpEmbed().build()).queue();
     }
 
-    /**
-     * Kontrol komutları öncesinde üyenin botla aynı ses kanalında olup olmadığını doğrular.
-     */
-    public boolean validateControlPermissions(Member member, Guild guild, TextChannel textChannel, InteractionHook hook) {
-        AudioChannel userChannel = getUserAudioChannel(member, textChannel);
+    public boolean validateControlPermissions(Member member, Guild guild, GuildMessageChannel messageChannel, InteractionHook hook) {
+        AudioChannel userChannel = getUserAudioChannel(member, messageChannel);
         if (userChannel == null) return false;
 
         AudioChannel botChannel = guild.getAudioManager().getConnectedChannel();
         if (botChannel == null) {
-            sendError(hook, textChannel, "❌ Bot şu an hiçbir ses kanalında değil!");
+            sendError(hook, messageChannel, "❌ Bot şu an hiçbir ses kanalında değil!");
             return false;
         }
 
         if (userChannel.getIdLong() != botChannel.getIdLong()) {
-            sendError(hook, textChannel, "❌ Bu komutu kullanabilmek için bot ile aynı ses kanalında (`" + botChannel.getName() + "`) olmalısın!");
+            sendError(hook, messageChannel, "❌ Bu komutu kullanabilmek için bot ile aynı ses kanalında (`" + botChannel.getName() + "`) olmalısın!");
             return false;
         }
 
         return true;
     }
 
-    private void sendError(InteractionHook hook, TextChannel textChannel, String errorMsg) {
+    private void sendError(InteractionHook hook, GuildMessageChannel messageChannel, String errorMsg) {
         if (hook != null) {
             hook.sendMessage(errorMsg).queue();
-        } else if (textChannel != null) {
-            textChannel.sendMessage(errorMsg).queue();
+        } else if (messageChannel != null) {
+            messageChannel.sendMessage(errorMsg).queue();
         }
     }
 
-    private AudioChannel getUserAudioChannel(Member member, TextChannel textChannel) {
+    private AudioChannel getUserAudioChannel(Member member, GuildMessageChannel messageChannel) {
         if (member == null || member.getVoiceState() == null || !member.getVoiceState().inAudioChannel()) {
-            if (textChannel != null) {
-                textChannel.sendMessage("❌ Bir ses kanalına bağlı olmalısın!").queue();
+            if (messageChannel != null) {
+                messageChannel.sendMessage("❌ Bir ses kanalına bağlı olmalısın!").queue();
             }
             return null;
         }

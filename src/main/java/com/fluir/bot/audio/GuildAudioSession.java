@@ -5,8 +5,8 @@ import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +33,7 @@ public class GuildAudioSession {
 
     private volatile VoiceConnectionState connectionState = VoiceConnectionState.DISCONNECTED;
     private volatile AudioChannel currentChannel;
-    private volatile TextChannel lastTextChannel;
+    private volatile GuildMessageChannel lastMessageChannel;
     private volatile ScheduledFuture<?> idleTimerTask;
     private volatile ScheduledFuture<?> aloneTimerTask;
     private volatile boolean isDestroyed = false;
@@ -50,15 +50,15 @@ public class GuildAudioSession {
      * Bağlantı doğrulama ve merkezi ses kanalına katılım.
      * Yarış durumlarını engelleyerek DISCONNECTED -> CONNECTING -> CONNECTED geçişlerini yönetir.
      */
-    public ConnectionResult ensureConnected(Guild guild, AudioChannel targetChannel, TextChannel textChannel) {
+    public ConnectionResult ensureConnected(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel) {
         sessionLock.lock();
         try {
             if (isDestroyed) {
                 return new ConnectionResult(false, "Oturum sonlandırılmış durumda.");
             }
 
-            if (textChannel != null) {
-                this.lastTextChannel = textChannel;
+            if (messageChannel != null) {
+                this.lastMessageChannel = messageChannel;
             }
 
             if (targetChannel == null) {
@@ -76,7 +76,7 @@ public class GuildAudioSession {
             // Yetki kontrolleri (VIEW_CHANNEL, VOICE_CONNECT, VOICE_SPEAK)
             Member selfMember = guild.getSelfMember();
             if (!selfMember.hasPermission(targetChannel, Permission.VIEW_CHANNEL)) {
-                return new ConnectionResult(false, "❌ Kanali görme iznim (`VIEW_CHANNEL`) yok: " + targetChannel.getName());
+                return new ConnectionResult(false, "❌ Kanalı görme iznim (`VIEW_CHANNEL`) yok: " + targetChannel.getName());
             }
             if (!selfMember.hasPermission(targetChannel, Permission.VOICE_CONNECT)) {
                 return new ConnectionResult(false, "❌ Kanala bağlanma iznim (`VOICE_CONNECT`) yok: " + targetChannel.getName());
@@ -242,8 +242,8 @@ public class GuildAudioSession {
     public AudioPlayerSendHandler getSendHandler() { return sendHandler; }
     public VoiceConnectionState getConnectionState() { return connectionState; }
     public AudioChannel getCurrentChannel() { return currentChannel; }
-    public TextChannel getLastTextChannel() { return lastTextChannel; }
-    public void setLastTextChannel(TextChannel textChannel) { this.lastTextChannel = textChannel; }
+    public GuildMessageChannel getLastMessageChannel() { return lastMessageChannel; }
+    public void setLastMessageChannel(GuildMessageChannel messageChannel) { this.lastMessageChannel = messageChannel; }
     public boolean isDestroyed() { return isDestroyed; }
 
     public record ConnectionResult(boolean success, String message) {}

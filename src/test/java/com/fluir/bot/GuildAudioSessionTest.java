@@ -8,8 +8,8 @@ import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +33,7 @@ class GuildAudioSessionTest {
 
     @Mock private Guild mockGuild;
     @Mock private AudioChannel mockAudioChannel;
-    @Mock private TextChannel mockTextChannel;
+    @Mock private GuildMessageChannel mockMessageChannel;
     @Mock private Member mockSelfMember;
     @Mock private AudioManager mockAudioManager;
 
@@ -62,7 +62,7 @@ class GuildAudioSessionTest {
     void testEnsureConnectedMissingPermissions() {
         when(mockSelfMember.hasPermission(mockAudioChannel, Permission.VOICE_CONNECT)).thenReturn(false);
 
-        GuildAudioSession.ConnectionResult result = session.ensureConnected(mockGuild, mockAudioChannel, mockTextChannel);
+        GuildAudioSession.ConnectionResult result = session.ensureConnected(mockGuild, mockAudioChannel, mockMessageChannel);
 
         assertFalse(result.success());
         assertTrue(result.message().contains("VOICE_CONNECT"));
@@ -82,7 +82,7 @@ class GuildAudioSessionTest {
             executor.submit(() -> {
                 try {
                     latch.await();
-                    GuildAudioSession.ConnectionResult res = session.ensureConnected(mockGuild, mockAudioChannel, mockTextChannel);
+                    GuildAudioSession.ConnectionResult res = session.ensureConnected(mockGuild, mockAudioChannel, mockMessageChannel);
                     if (res.success()) {
                         successCount.incrementAndGet();
                     }
