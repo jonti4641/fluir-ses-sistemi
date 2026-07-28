@@ -12,6 +12,9 @@ import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
+import dev.lavalink.youtube.clients.AndroidLite;
+import dev.lavalink.youtube.clients.Music;
+import dev.lavalink.youtube.clients.Web;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
@@ -22,12 +25,6 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Tüm sunucuların ses yöneticilerini yöneten sınıf.
- *
- * ÖNEMLI: registerRemoteSources() KULLANILMADI çünkü eski kırık YouTube
- * source'u da ekler ve çakışmaya neden olur. Kaynaklar tek tek kaydedilir.
- */
 public class AudioPlayerManager {
 
     private static final Logger logger = LoggerFactory.getLogger(AudioPlayerManager.class);
@@ -38,69 +35,71 @@ public class AudioPlayerManager {
     public AudioPlayerManager() {
         this.playerManager = new DefaultAudioPlayerManager();
         this.guildAudioManagers = new HashMap<>();
-
         registerSources();
     }
 
     private void registerSources() {
         try {
-            // ✅ YouTube — dev.lavalink.youtube:v2 (güncel, aktif bakımlı)
-            YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(true);
+            // ✅ YouTube — AndroidLite ve Music client kullan
+            // WEB_EMBEDDED_PLAYER KULLANILMIYOR (SignatureCipher hatası verir)
+            // AndroidLite: cipher gerektirmez, Innertube API kullanır
+            // Music: YouTube Music için
+            // Web: Fallback
+            YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(
+                    true,           // allowSearch
+                    new AndroidLite(),
+                    new Music(),
+                    new Web()
+            );
             playerManager.registerSourceManager(youtube);
-            logger.info("✅ YouTube kaynağı kayıt edildi (v2).");
+            logger.info("✅ YouTube kaynağı kayıt edildi (AndroidLite + Music + Web).");
         } catch (Exception e) {
             logger.error("❌ YouTube kaynağı başlatılamadı: {}", e.getMessage(), e);
         }
 
         try {
-            // ✅ SoundCloud
             playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
             logger.info("✅ SoundCloud kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ SoundCloud başlatılamadı: {}", e.getMessage());
         }
 
         try {
-            // ✅ Bandcamp
             playerManager.registerSourceManager(new BandcampAudioSourceManager());
             logger.info("✅ Bandcamp kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ Bandcamp kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ Bandcamp başlatılamadı: {}", e.getMessage());
         }
 
         try {
-            // ✅ Vimeo
             playerManager.registerSourceManager(new VimeoAudioSourceManager());
             logger.info("✅ Vimeo kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ Vimeo kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ Vimeo başlatılamadı: {}", e.getMessage());
         }
 
         try {
-            // ✅ Twitch
             playerManager.registerSourceManager(new TwitchStreamAudioSourceManager());
             logger.info("✅ Twitch kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ Twitch kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ Twitch başlatılamadı: {}", e.getMessage());
         }
 
         try {
-            // ✅ HTTP (direkt ses URL'leri)
             playerManager.registerSourceManager(new HttpAudioSourceManager());
             logger.info("✅ HTTP kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ HTTP kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ HTTP başlatılamadı: {}", e.getMessage());
         }
 
         try {
-            // ✅ Yerel dosyalar
             playerManager.registerSourceManager(new LocalAudioSourceManager());
             logger.info("✅ Yerel dosya kaynağı kayıt edildi.");
         } catch (Exception e) {
-            logger.error("❌ Yerel dosya kaynağı başlatılamadı: {}", e.getMessage());
+            logger.error("❌ Yerel dosya başlatılamadı: {}", e.getMessage());
         }
 
-        logger.info("🎵 Tüm ses kaynakları kayıt işlemi tamamlandı.");
+        logger.info("🎵 Tüm ses kaynakları kayıt tamamlandı.");
     }
 
     public synchronized GuildAudioManager getGuildAudioManager(Guild guild) {
@@ -114,6 +113,10 @@ public class AudioPlayerManager {
         return manager;
     }
 
+    /**
+     * Parçayı yükle ve çal. Eğer yükleme başarısız olursa ve hiçbir şey
+     * çalmıyorsa ses kanalından otomatik ayrıl (sürekli girip çıkmayı engeller).
+     */
     public void loadAndPlay(Guild guild, TextChannel textChannel, VoiceChannel voiceChannel, String trackUrl) {
         GuildAudioManager manager = getGuildAudioManager(guild);
         manager.scheduler.setAnnouncementChannel(textChannel);
@@ -129,6 +132,7 @@ public class AudioPlayerManager {
                 manager.scheduler.queue(track);
                 textChannel.sendMessage("✅ **" + track.getInfo().title + "** kuyruğa eklendi.").queue();
             }
+
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (playlist.isSearchResult()) {
@@ -141,17 +145,35 @@ public class AudioPlayerManager {
                             playlist.getTracks().size() + "` parça eklendi.").queue();
                 }
             }
+
             @Override
             public void noMatches() {
                 textChannel.sendMessage("❌ Sonuç bulunamadı: **" +
                         trackUrl.replace("ytsearch:", "") + "**").queue();
+                // Hiçbir şey çalmıyorsa ses kanalından çık
+                disconnectIfIdle(guild, manager);
             }
+
             @Override
             public void loadFailed(FriendlyException e) {
-                textChannel.sendMessage("❌ Yükleme hatası: `" + e.getMessage() + "`").queue();
                 logger.error("loadFailed [{}]: {}", trackUrl, e.getMessage());
+                textChannel.sendMessage("❌ **Yükleme başarısız:** `" + e.getMessage() + "`\n" +
+                        "💡 Bu video yüklenemedi. SoundCloud URL veya farklı bir parça dene.").queue();
+                // Hiçbir şey çalmıyorsa ses kanalından çık
+                disconnectIfIdle(guild, manager);
             }
         });
+    }
+
+    /**
+     * Eğer bot ses kanalında bağlı ama hiçbir şey çalmıyorsa bağlantıyı kes.
+     * "Sürekli girip çıkma" sorununu engeller.
+     */
+    private void disconnectIfIdle(Guild guild, GuildAudioManager manager) {
+        if (manager.player.getPlayingTrack() == null && manager.scheduler.getQueue().isEmpty()) {
+            guild.getAudioManager().closeAudioConnection();
+            logger.info("🔇 Boşta kaldı, {} sunucusundan ayrıldı.", guild.getName());
+        }
     }
 
     public void disconnect(Guild guild) {

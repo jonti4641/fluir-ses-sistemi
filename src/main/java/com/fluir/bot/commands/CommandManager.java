@@ -217,13 +217,21 @@ public class CommandManager extends ListenerAdapter {
                 @Override
                 public void noMatches() {
                     hook.sendMessage("❌ **\"" + finalQuery.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
+                    // Boştaysa ses kanalından çık — sürekli girip çıkmayı engelle
+                    if (manager.player.getPlayingTrack() == null && manager.scheduler.getQueue().isEmpty()) {
+                        guild.getAudioManager().closeAudioConnection();
+                    }
                 }
 
                 @Override
                 public void loadFailed(FriendlyException exception) {
                     logger.error("loadFailed: {}", exception.getMessage());
-                    hook.sendMessage("❌ Yüklenemedi: `" + exception.getMessage() + "`\n" +
-                            "💡 YouTube yerine SoundCloud dene veya direkt URL ver.").queue();
+                    hook.sendMessage("❌ **Yükleme başarısız:** `" + exception.getMessage() + "`\n" +
+                            "💡 Bu video yüklenemedi. SoundCloud URL veya farklı bir parça dene.").queue();
+                    // Boştaysa ses kanalından çık — sürekli girip çıkmayı engelle
+                    if (manager.player.getPlayingTrack() == null && manager.scheduler.getQueue().isEmpty()) {
+                        guild.getAudioManager().closeAudioConnection();
+                    }
                 }
             });
         } catch (Exception e) {
