@@ -11,7 +11,6 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
-import com.github.topi314.lavasrc.spotify.SpotifyAudioSourceManager;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
 import dev.lavalink.youtube.clients.Music;
 import dev.lavalink.youtube.clients.Web;
@@ -40,20 +39,7 @@ public class AudioPlayerManager {
     }
 
     private void registerSources() {
-        // 1. Spotify desteği (LavaSrc)
-        try {
-            SpotifyAudioSourceManager spotify = new SpotifyAudioSourceManager(
-                    null,
-                    "https://open.spotify.com",
-                    playerManager
-            );
-            playerManager.registerSourceManager(spotify);
-            logger.info("✅ Spotify kaynağı kayıt edildi (LavaSrc).");
-        } catch (Exception e) {
-            logger.warn("⚠️ Spotify kaynağı yüklenemedi: {}", e.getMessage());
-        }
-
-        // 2. SoundCloud (Kesintisiz, IP engelsiz müzik kaynağı)
+        // 1. SoundCloud (Kesintisiz, IP engelsiz müzik kaynağı)
         try {
             playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
             logger.info("✅ SoundCloud kaynağı kayıt edildi.");
@@ -61,7 +47,7 @@ public class AudioPlayerManager {
             logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage());
         }
 
-        // 3. YouTube (Music + Web client)
+        // 2. YouTube (Music + Web client)
         try {
             YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(
                     true,
@@ -74,7 +60,7 @@ public class AudioPlayerManager {
             logger.warn("⚠️ YouTube kaynağı yüklenemedi: {}", e.getMessage());
         }
 
-        // 4. Diğer platformlar
+        // 3. Diğer platformlar
         try { playerManager.registerSourceManager(new BandcampAudioSourceManager()); } catch (Exception ignored) {}
         try { playerManager.registerSourceManager(new VimeoAudioSourceManager()); } catch (Exception ignored) {}
         try { playerManager.registerSourceManager(new TwitchStreamAudioSourceManager()); } catch (Exception ignored) {}
@@ -116,6 +102,14 @@ public class AudioPlayerManager {
     }
 
     public void loadAndPlay(Guild guild, TextChannel textChannel, VoiceChannel voiceChannel, String trackUrl) {
+        // Spotify URL kontrolü
+        if (trackUrl.contains("spotify.com")) {
+            String resolvedQuery = SpotifyResolver.resolveSpotifyUrl(trackUrl);
+            if (resolvedQuery != null) {
+                trackUrl = "scsearch:" + resolvedQuery;
+            }
+        }
+
         GuildAudioManager manager = getGuildAudioManager(guild);
         manager.scheduler.setAnnouncementChannel(textChannel);
 
@@ -124,7 +118,9 @@ public class AudioPlayerManager {
             audioManager.openAudioConnection(voiceChannel);
         }
 
-        playerManager.loadItemOrdered(manager, trackUrl, new AudioLoadResultHandler() {
+        final String finalTrackUrl = trackUrl;
+
+        playerManager.loadItemOrdered(manager, finalTrackUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
                 if (isUnwantedMedia(track.getInfo().title)) {
@@ -167,23 +163,21 @@ public class AudioPlayerManager {
 
             @Override
             public void noMatches() {
-                // YouTube aramasında eşleşme yoksa SoundCloud fallback yap
-                if (trackUrl.startsWith("ytsearch:")) {
-                    String scQuery = "scsearch:" + trackUrl.substring(9);
+                if (finalTrackUrl.startsWith("ytsearch:")) {
+                    String scQuery = "scsearch:" + finalTrackUrl.substring(9);
                     logger.info("🔄 YouTube sonuç vermedi, SoundCloud ile deneniyor: {}", scQuery);
                     loadAndPlay(guild, textChannel, voiceChannel, scQuery);
                     return;
                 }
-                textChannel.sendMessage("❌ Sonuç bulunamadı: **" + trackUrl.replaceAll("^(ytsearch:|scsearch:|spsearch:)", "") + "**").queue();
+                textChannel.sendMessage("❌ Sonuç bulunamadı: **" + finalTrackUrl.replaceAll("^(ytsearch:|scsearch:|spsearch:)", "") + "**").queue();
                 disconnectIfIdle(guild, manager);
             }
 
             @Override
             public void loadFailed(FriendlyException e) {
-                logger.error("loadFailed [{}]: {}", trackUrl, e.getMessage());
-                // YouTube engellendiyse SoundCloud fallback dene
-                if (trackUrl.startsWith("ytsearch:")) {
-                    String scQuery = "scsearch:" + trackUrl.substring(9);
+                logger.error("loadFailed [{}]: {}", finalTrackUrl, e.getMessage());
+                if (finalTrackUrl.startsWith("ytsearch:")) {
+                    String scQuery = "scsearch:" + finalTrackUrl.substring(9);
                     logger.info("🔄 YouTube yükleme hatası. SoundCloud fallback başlatılıyor: {}", scQuery);
                     loadAndPlay(guild, textChannel, voiceChannel, scQuery);
                     return;

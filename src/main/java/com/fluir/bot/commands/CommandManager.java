@@ -398,6 +398,13 @@ public class CommandManager extends ListenerAdapter {
     }
 
     private void loadDirectUrl(Guild guild, InteractionHook hook, VoiceChannel vc, String url) {
+        if (url.contains("spotify.com")) {
+            String resolvedQuery = com.fluir.bot.audio.SpotifyResolver.resolveSpotifyUrl(url);
+            if (resolvedQuery != null) {
+                url = "scsearch:" + resolvedQuery;
+            }
+        }
+
         GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
 
         audioPlayerManager.getPlayerManager().loadItemOrdered(manager, url, new AudioLoadResultHandler() {
