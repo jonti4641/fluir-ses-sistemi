@@ -156,7 +156,7 @@ public class CommandManager extends ListenerAdapter {
     // SLASH KOMUT İŞLEYİCİLER
     // ============================
 
-    /** /çal — deferReply sonrası hook ile yanıtlar */
+    /** /çal — deferReply sonrası hook ile yanıtlar, her durumda hook tamamlanır */
     private void handlePlay(SlashCommandInteractionEvent event) {
         Member member = event.getMember();
         Guild  guild  = event.getGuild();
@@ -168,53 +168,69 @@ public class CommandManager extends ListenerAdapter {
         }
 
         String query = event.getOption("sorgu").getAsString();
-        if (!query.startsWith("http")) query = "ytsearch:" + query;
+        final String finalQuery = query.startsWith("http") ? query : "ytsearch:" + query;
 
-        // Önce yanıtı ertele — 3 sn dolmadan defer et
+        // Yanıtı ertele — Discord 3 sn içinde bir şey görmek ister
         event.deferReply().queue();
-        InteractionHook hook = event.getHook();
+        final InteractionHook hook = event.getHook();
 
-        // Ses kanalına bağlan
-        AudioManager am = guild.getAudioManager();
-        if (!am.isConnected()) am.openAudioConnection(vc);
+        try {
+            // Ses kanalına bağlan
+            AudioManager am = guild.getAudioManager();
+            if (!am.isConnected()) am.openAudioConnection(vc);
 
-        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
-        final String finalQuery = query;
+            GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
 
-        audioPlayerManager.getPlayerManager().loadItemOrdered(manager, finalQuery, new AudioLoadResultHandler() {
+            audioPlayerManager.getPlayerManager().loadItemOrdered(manager, finalQuery, new AudioLoadResultHandler() {
 
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                manager.scheduler.queue(track);
-                hook.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
-                        "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
-            }
-
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                if (playlist.isSearchResult()) {
-                    AudioTrack track = playlist.getTracks().get(0);
-                    manager.scheduler.queue(track);
-                    hook.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**\n" +
-                            "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
-                } else {
-                    for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
-                    hook.sendMessage("📃 **" + playlist.getName() + "** — `" +
-                            playlist.getTracks().size() + "` parça kuyruğa eklendi!").queue();
+                @Override
+                public void trackLoaded(AudioTrack track) {
+                    try {
+                        manager.scheduler.queue(track);
+                        hook.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
+                                "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
+                    } catch (Exception e) {
+                        hook.sendMessage("✅ Parça kuyruğa eklendi.").queue();
+                        logger.error("trackLoaded yanıt hatası: {}", e.getMessage());
+                    }
                 }
-            }
 
-            @Override
-            public void noMatches() {
-                hook.sendMessage("❌ **\"" + finalQuery.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
-            }
+                @Override
+                public void playlistLoaded(AudioPlaylist playlist) {
+                    try {
+                        if (playlist.isSearchResult()) {
+                            AudioTrack track = playlist.getTracks().get(0);
+                            manager.scheduler.queue(track);
+                            hook.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**\n" +
+                                    "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
+                        } else {
+                            for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
+                            hook.sendMessage("📃 **" + playlist.getName() + "** — `" +
+                                    playlist.getTracks().size() + "` parça kuyruğa eklendi!").queue();
+                        }
+                    } catch (Exception e) {
+                        hook.sendMessage("✅ Çalma listesi kuyruğa eklendi.").queue();
+                        logger.error("playlistLoaded yanıt hatası: {}", e.getMessage());
+                    }
+                }
 
-            @Override
-            public void loadFailed(FriendlyException exception) {
-                hook.sendMessage("❌ Yükleme hatası: `" + exception.getMessage() + "`").queue();
-                logger.error("Yükleme hatası: {}", exception.getMessage());
-            }
-        });
+                @Override
+                public void noMatches() {
+                    hook.sendMessage("❌ **\"" + finalQuery.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
+                }
+
+                @Override
+                public void loadFailed(FriendlyException exception) {
+                    logger.error("loadFailed: {}", exception.getMessage());
+                    hook.sendMessage("❌ Yüklenemedi: `" + exception.getMessage() + "`\n" +
+                            "💡 YouTube yerine SoundCloud dene veya direkt URL ver.").queue();
+                }
+            });
+        } catch (Exception e) {
+            // Herhangi bir beklenmedik hata — hook mutlaka yanıtlanmalı
+            logger.error("handlePlay beklenmedik hata: {}", e.getMessage(), e);
+            hook.sendMessage("❌ Beklenmedik hata oluştu: `" + e.getMessage() + "`").queue();
+        }
     }
 
     private void handlePause(SlashCommandInteractionEvent event) {

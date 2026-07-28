@@ -17,10 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Tüm sunucuların ses yöneticilerini ve LavaPlayer'ı yöneten ana sınıf.
- * YouTube için dev.lavalink.youtube:v2 kullanır (LavaPlayer'ın dahili YT desteği bozuk).
- */
 public class AudioPlayerManager {
 
     private static final Logger logger = LoggerFactory.getLogger(AudioPlayerManager.class);
@@ -32,40 +28,31 @@ public class AudioPlayerManager {
         this.playerManager = new DefaultAudioPlayerManager();
         this.guildAudioManagers = new HashMap<>();
 
-        // ✅ Güncel YouTube kaynağı — dahili YT desteği YERİNE bunu kullan
-        YoutubeAudioSourceManager ytSourceManager = new YoutubeAudioSourceManager();
-        playerManager.registerSourceManager(ytSourceManager);
+        // 1) Önce güncel YouTube kaynağını kaydet (öncelik bu alır)
+        YoutubeAudioSourceManager ytManager = new YoutubeAudioSourceManager(true);
+        playerManager.registerSourceManager(ytManager);
 
-        // Diğer kaynaklar: SoundCloud, Twitch, Vimeo, Bandcamp, HTTP...
-        // YouTube'u manuel kaydettiğimiz için registerRemoteSources'tan çıkarıyoruz
-        AudioSourceManagers.registerRemoteSources(playerManager,
-                com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeAudioSourceManager.class);
-
-        // Yerel dosya desteği
+        // 2) Diğer uzak kaynaklar: SoundCloud, Twitch, Vimeo, Bandcamp, HTTP...
+        //    registerRemoteSources eski kırık YouTube'u da ekler ama bizimki önce geldiği için
+        //    YouTube URL'lerini o yakalar, diğerleri ikinci sıraya düşer.
+        AudioSourceManagers.registerRemoteSources(playerManager);
         AudioSourceManagers.registerLocalSource(playerManager);
 
-        logger.info("🎵 AudioPlayerManager başlatıldı — YouTube v2 kaynağı aktif.");
+        logger.info("✅ AudioPlayerManager hazır — YouTube v2, SoundCloud, Twitch aktif.");
     }
 
-    /**
-     * Bir sunucunun ses yöneticisini döndürür veya oluşturur.
-     */
     public synchronized GuildAudioManager getGuildAudioManager(Guild guild) {
         long guildId = guild.getIdLong();
         GuildAudioManager manager = guildAudioManagers.get(guildId);
-
         if (manager == null) {
             manager = new GuildAudioManager(playerManager);
             guildAudioManagers.put(guildId, manager);
         }
-
         guild.getAudioManager().setSendingHandler(manager.getSendHandler());
         return manager;
     }
 
-    /**
-     * Parçayı yükler ve çalar (TextChannel mesaj versiyonu — prefix komutlar için).
-     */
+    /** Prefix komutlar için */
     public void loadAndPlay(Guild guild, TextChannel textChannel, VoiceChannel voiceChannel, String trackUrl) {
         GuildAudioManager manager = getGuildAudioManager(guild);
         manager.scheduler.setAnnouncementChannel(textChannel);
@@ -73,51 +60,37 @@ public class AudioPlayerManager {
         AudioManager audioManager = guild.getAudioManager();
         if (!audioManager.isConnected()) {
             audioManager.openAudioConnection(voiceChannel);
-            logger.info("📢 {} kanalına bağlanıldı.", voiceChannel.getName());
         }
 
         playerManager.loadItemOrdered(manager, trackUrl, new AudioLoadResultHandler() {
-
             @Override
             public void trackLoaded(AudioTrack track) {
-                logger.info("✅ Parça yüklendi: {}", track.getInfo().title);
-                textChannel.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**").queue();
                 manager.scheduler.queue(track);
+                textChannel.sendMessage("✅ **" + track.getInfo().title + "** kuyruğa eklendi.").queue();
             }
-
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (playlist.isSearchResult()) {
                     AudioTrack track = playlist.getTracks().get(0);
-                    logger.info("🔍 Arama sonucu: {}", track.getInfo().title);
-                    textChannel.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**").queue();
                     manager.scheduler.queue(track);
+                    textChannel.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**").queue();
                 } else {
-                    textChannel.sendMessage("📃 **" + playlist.getName() + "** — `" +
-                            playlist.getTracks().size() + "` parça eklendi!").queue();
-                    for (AudioTrack track : playlist.getTracks()) {
-                        manager.scheduler.queue(track);
-                    }
+                    for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
+                    textChannel.sendMessage("📃 **" + playlist.getName() + "** — `" + playlist.getTracks().size() + "` parça eklendi.").queue();
                 }
             }
-
             @Override
             public void noMatches() {
-                textChannel.sendMessage("❌ **\"" + trackUrl.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
-                logger.warn("Sonuç bulunamadı: {}", trackUrl);
+                textChannel.sendMessage("❌ Sonuç bulunamadı: **" + trackUrl.replace("ytsearch:", "") + "**").queue();
             }
-
             @Override
             public void loadFailed(FriendlyException exception) {
-                textChannel.sendMessage("❌ Yükleme hatası: **" + exception.getMessage() + "**").queue();
-                logger.error("Parça yükleme hatası: {}", exception.getMessage());
+                textChannel.sendMessage("❌ Yükleme hatası: `" + exception.getMessage() + "`").queue();
+                logger.error("loadFailed: {}", exception.getMessage());
             }
         });
     }
 
-    /**
-     * Sunucunun ses bağlantısını keser ve yöneticiyi temizler.
-     */
     public void disconnect(Guild guild) {
         GuildAudioManager manager = guildAudioManagers.get(guild.getIdLong());
         if (manager != null) {
@@ -125,7 +98,6 @@ public class AudioPlayerManager {
             manager.scheduler.getQueue().clear();
         }
         guild.getAudioManager().closeAudioConnection();
-        logger.info("🔇 {} sunucusundan ayrıldı.", guild.getName());
     }
 
     public DefaultAudioPlayerManager getPlayerManager() {
