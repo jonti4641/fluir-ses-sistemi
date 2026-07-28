@@ -15,21 +15,21 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import net.dv8tion.jda.api.managers.AudioManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Queue;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CommandManager extends ListenerAdapter {
 
@@ -38,6 +38,10 @@ public class CommandManager extends ListenerAdapter {
     private static final Color BOT_COLOR = new Color(88, 101, 242);
 
     private final AudioPlayerManager audioPlayerManager;
+
+    // Arama panelinden seçilen parçaları geçici tutan thread-safe cache
+    // Key: selectMenuId, Value: Map<trackIndex, AudioTrack>
+    private static final Map<String, List<AudioTrack>> searchPanelCache = new ConcurrentHashMap<>();
 
     public CommandManager(AudioPlayerManager audioPlayerManager) {
         this.audioPlayerManager = audioPlayerManager;
@@ -48,8 +52,8 @@ public class CommandManager extends ListenerAdapter {
     // ============================
     public static void registerSlashCommands(JDA jda) {
         List<SlashCommandData> commands = new ArrayList<>();
-        commands.add(Commands.slash("çal", "Bir parça veya çalma listesi çalar")
-                .addOption(OptionType.STRING, "sorgu", "YouTube/SoundCloud URL veya arama terimi", true));
+        commands.add(Commands.slash("çal", "Spotify, SoundCloud veya YouTube'dan müzik çalar")
+                .addOption(OptionType.STRING, "sorgu", "Şarkı adı veya Spotify / SoundCloud / YouTube URL'si", true));
         commands.add(Commands.slash("dur", "Çalmayı duraklatır veya devam ettirir"));
         commands.add(Commands.slash("atla", "Mevcut parçayı atlar"));
         commands.add(Commands.slash("durdur", "Çalmayı durdurur ve botu çıkarır"));
@@ -78,19 +82,90 @@ public class CommandManager extends ListenerAdapter {
             return;
         }
 
-        switch (event.getName()) {
-            case "çal"      -> handlePlay(event);
-            case "dur"      -> handlePause(event);
-            case "atla"     -> handleSkip(event);
-            case "durdur"   -> handleStop(event);
-            case "kuyruk"   -> handleQueue(event);
-            case "döngü"    -> handleLoop(event);
-            case "ses"      -> handleVolume(event);
-            case "simdi"    -> handleNowPlaying(event);
-            case "karistir" -> handleShuffle(event);
-            case "yardim"   -> handleHelp(event);
-            case "temizle"  -> handleClear(event);
-            default         -> event.reply("❌ Bilinmeyen komut!").setEphemeral(true).queue();
+        try {
+            switch (event.getName()) {
+                case "çal"      -> handlePlay(event);
+                case "dur"      -> handlePause(event);
+                case "atla"     -> handleSkip(event);
+                case "durdur"   -> handleStop(event);
+                case "kuyruk"   -> handleQueue(event);
+                case "döngü"    -> handleLoop(event);
+                case "ses"      -> handleVolume(event);
+                case "simdi"    -> handleNowPlaying(event);
+                case "karistir" -> handleShuffle(event);
+                case "yardim"   -> handleHelp(event);
+                case "temizle"  -> handleClear(event);
+                default         -> event.reply("❌ Bilinmeyen komut!").setEphemeral(true).queue();
+            }
+        } catch (Exception e) {
+            logger.error("Slash komut hatası [{}]: {}", event.getName(), e.getMessage(), e);
+            if (!event.isAcknowledged()) {
+                event.reply("❌ İşlem sırasında bir hata oluştu: " + e.getMessage()).setEphemeral(true).queue();
+            }
+        }
+    }
+
+    // ============================
+    // DROPDOWN (PANEL) SEÇİM İŞLEYİCİSİ
+    // ============================
+    @Override
+    public void onStringSelectInteraction(StringSelectInteractionEvent event) {
+        String menuId = event.getComponentId();
+        if (!menuId.startsWith("song_select:")) return;
+
+        try {
+            Member member = event.getMember();
+            Guild guild = event.getGuild();
+            if (member == null || guild == null) return;
+
+            VoiceChannel vc = getVoiceChannel(member, null);
+            if (vc == null) {
+                event.reply("❌ Bir ses kanalında olmalısın!").setEphemeral(true).queue();
+                return;
+            }
+
+            List<AudioTrack> tracks = searchPanelCache.get(menuId);
+            if (tracks == null || tracks.isEmpty()) {
+                event.reply("❌ Seçim süresi doldu, lütfen tekrar arama yapın.").setEphemeral(true).queue();
+                return;
+            }
+
+            String selectedValue = event.getValues().get(0);
+            if (selectedValue.equals("cancel")) {
+                searchPanelCache.remove(menuId);
+                event.editMessage("❌ **Arama seçimi iptal edildi.**").setComponents().setEmbeds().queue();
+                return;
+            }
+
+            int index = Integer.parseInt(selectedValue);
+            if (index < 0 || index >= tracks.size()) {
+                event.reply("❌ Geçersiz seçim.").setEphemeral(true).queue();
+                return;
+            }
+
+            AudioTrack chosenTrack = tracks.get(index);
+
+            // Ses kanalına bağlan ve çal
+            AudioManager am = guild.getAudioManager();
+            if (!am.isConnected()) am.openAudioConnection(vc);
+
+            GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
+            manager.scheduler.queue(chosenTrack);
+
+            searchPanelCache.remove(menuId);
+
+            EmbedBuilder eb = new EmbedBuilder()
+                    .setTitle("🎵 Parça Seçildi & Kuyruğa Eklendi")
+                    .setDescription("**" + chosenTrack.getInfo().title + "**")
+                    .addField("Sanatçı / Kanal", chosenTrack.getInfo().author, true)
+                    .addField("Süre", TrackScheduler.formatDuration(chosenTrack.getDuration()), true)
+                    .setColor(BOT_COLOR);
+
+            event.editMessageEmbeds(eb.build()).setComponents().queue();
+
+        } catch (Exception e) {
+            logger.error("Panel seçim hatası: {}", e.getMessage(), e);
+            event.reply("❌ Parça başlatılırken hata oluştu.").setEphemeral(true).queue();
         }
     }
 
@@ -111,134 +186,268 @@ public class CommandManager extends ListenerAdapter {
         TextChannel channel = event.getChannel().asTextChannel();
         Member      member  = event.getMember();
 
-        switch (cmd) {
-            case "çal", "cal", "play", "p" -> {
-                if (args.isEmpty()) { channel.sendMessage("❌ Kullanım: `!çal <URL veya arama>`").queue(); return; }
-                VoiceChannel vc = getVoiceChannel(member, channel);
-                if (vc == null) return;
-                loadAndPlayPrefix(guild, channel, vc, args.startsWith("http") ? args : "ytsearch:" + args);
+        try {
+            switch (cmd) {
+                case "çal", "cal", "play", "p" -> {
+                    if (args.isEmpty()) { channel.sendMessage("❌ Kullanım: `!çal <şarkı adı veya URL>`").queue(); return; }
+                    VoiceChannel vc = getVoiceChannel(member, channel);
+                    if (vc == null) return;
+                    String query = args.startsWith("http") ? args : "scsearch:" + args;
+                    audioPlayerManager.loadAndPlay(guild, channel, vc, query);
+                }
+                case "dur", "pause" -> {
+                    GuildAudioManager m = audioPlayerManager.getGuildAudioManager(guild);
+                    boolean p = !m.player.isPaused(); m.player.setPaused(p);
+                    channel.sendMessage(p ? "⏸️ Duraklatıldı." : "▶️ Devam ediyor.").queue();
+                }
+                case "atla", "skip", "s" -> {
+                    audioPlayerManager.getGuildAudioManager(guild).scheduler.nextTrack();
+                    channel.sendMessage("⏭️ Sonraki parçaya geçildi.").queue();
+                }
+                case "durdur", "stop" -> {
+                    audioPlayerManager.disconnect(guild);
+                    channel.sendMessage("⏹️ Durduruldu.").queue();
+                }
+                case "ses", "volume", "v" -> {
+                    try {
+                        int v = Integer.parseInt(args);
+                        if (v < 0 || v > 150) { channel.sendMessage("❌ 0–150 arasında olmalı!").queue(); return; }
+                        audioPlayerManager.getGuildAudioManager(guild).player.setVolume(v);
+                        channel.sendMessage("🔊 Ses **" + v + "%** ayarlandı.").queue();
+                    } catch (NumberFormatException e) { channel.sendMessage("❌ Kullanım: `!ses <0-150>`").queue(); }
+                }
+                case "döngü", "loop" -> {
+                    GuildAudioManager m = audioPlayerManager.getGuildAudioManager(guild);
+                    boolean l = !m.scheduler.isLoop(); m.scheduler.setLoop(l);
+                    channel.sendMessage(l ? "🔁 Döngü **açık**." : "➡️ Döngü **kapalı**.").queue();
+                }
+                case "temizle", "clear" -> {
+                    audioPlayerManager.getGuildAudioManager(guild).scheduler.getQueue().clear();
+                    channel.sendMessage("🗑️ Kuyruk temizlendi.").queue();
+                }
+                case "yardim", "yardım", "help", "h" -> channel.sendMessageEmbeds(buildHelpEmbed().build()).queue();
             }
-            case "dur", "pause"            -> {
-                GuildAudioManager m = audioPlayerManager.getGuildAudioManager(guild);
-                boolean p = !m.player.isPaused(); m.player.setPaused(p);
-                channel.sendMessage(p ? "⏸️ Duraklatıldı." : "▶️ Devam ediyor.").queue();
-            }
-            case "atla", "skip", "s"       -> {
-                audioPlayerManager.getGuildAudioManager(guild).scheduler.nextTrack();
-                channel.sendMessage("⏭️ Sonraki parçaya geçildi.").queue();
-            }
-            case "durdur", "stop"          -> {
-                audioPlayerManager.disconnect(guild);
-                channel.sendMessage("⏹️ Durduruldu.").queue();
-            }
-            case "ses", "volume", "v"      -> {
-                try {
-                    int v = Integer.parseInt(args);
-                    if (v < 0 || v > 150) { channel.sendMessage("❌ 0–150 arasında olmalı!").queue(); return; }
-                    audioPlayerManager.getGuildAudioManager(guild).player.setVolume(v);
-                    channel.sendMessage("🔊 Ses **" + v + "%** ayarlandı.").queue();
-                } catch (NumberFormatException e) { channel.sendMessage("❌ Kullanım: `!ses <0-150>`").queue(); }
-            }
-            case "döngü", "loop"           -> {
-                GuildAudioManager m = audioPlayerManager.getGuildAudioManager(guild);
-                boolean l = !m.scheduler.isLoop(); m.scheduler.setLoop(l);
-                channel.sendMessage(l ? "🔁 Döngü **açık**." : "➡️ Döngü **kapalı**.").queue();
-            }
-            case "temizle", "clear"        -> {
-                audioPlayerManager.getGuildAudioManager(guild).scheduler.getQueue().clear();
-                channel.sendMessage("🗑️ Kuyruk temizlendi.").queue();
-            }
-            case "yardim", "yardım", "help", "h" -> channel.sendMessageEmbeds(buildHelpEmbed().build()).queue();
+        } catch (Exception e) {
+            logger.error("Prefix komut hatası [!{}]: {}", cmd, e.getMessage());
         }
     }
 
     // ============================
-    // SLASH KOMUT İŞLEYİCİLER
+    // /ÇAL İŞLEYİCİSİ (PANEL VE LİNK Desteği)
     // ============================
-
-    /** /çal — deferReply sonrası hook ile yanıtlar, her durumda hook tamamlanır */
     private void handlePlay(SlashCommandInteractionEvent event) {
         Member member = event.getMember();
         Guild  guild  = event.getGuild();
 
         VoiceChannel vc = getVoiceChannel(member, null);
         if (vc == null) {
-            event.reply("❌ Bir ses kanalına bağlı olmalısın!").setEphemeral(true).queue();
+            event.reply("❌ Bir ses kanalında olmalısın!").setEphemeral(true).queue();
             return;
         }
 
-        String query = event.getOption("sorgu").getAsString();
-        final String finalQuery = query.startsWith("http") ? query : "ytsearch:" + query;
-
-        // Yanıtı ertele — Discord 3 sn içinde bir şey görmek ister
+        String rawQuery = event.getOption("sorgu").getAsString().trim();
         event.deferReply().queue();
         final InteractionHook hook = event.getHook();
 
-        try {
-            // Ses kanalına bağlan
-            AudioManager am = guild.getAudioManager();
-            if (!am.isConnected()) am.openAudioConnection(vc);
-
-            GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
-
-            audioPlayerManager.getPlayerManager().loadItemOrdered(manager, finalQuery, new AudioLoadResultHandler() {
-
-                @Override
-                public void trackLoaded(AudioTrack track) {
-                    try {
-                        manager.scheduler.queue(track);
-                        hook.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
-                                "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
-                    } catch (Exception e) {
-                        hook.sendMessage("✅ Parça kuyruğa eklendi.").queue();
-                        logger.error("trackLoaded yanıt hatası: {}", e.getMessage());
-                    }
-                }
-
-                @Override
-                public void playlistLoaded(AudioPlaylist playlist) {
-                    try {
-                        if (playlist.isSearchResult()) {
-                            AudioTrack track = playlist.getTracks().get(0);
-                            manager.scheduler.queue(track);
-                            hook.sendMessage("🎵 Çalınıyor: **" + track.getInfo().title + "**\n" +
-                                    "⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
-                        } else {
-                            for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
-                            hook.sendMessage("📃 **" + playlist.getName() + "** — `" +
-                                    playlist.getTracks().size() + "` parça kuyruğa eklendi!").queue();
-                        }
-                    } catch (Exception e) {
-                        hook.sendMessage("✅ Çalma listesi kuyruğa eklendi.").queue();
-                        logger.error("playlistLoaded yanıt hatası: {}", e.getMessage());
-                    }
-                }
-
-                @Override
-                public void noMatches() {
-                    hook.sendMessage("❌ **\"" + finalQuery.replace("ytsearch:", "") + "\"** için sonuç bulunamadı!").queue();
-                    // Boştaysa ses kanalından çık — sürekli girip çıkmayı engelle
-                    if (manager.player.getPlayingTrack() == null && manager.scheduler.getQueue().isEmpty()) {
-                        guild.getAudioManager().closeAudioConnection();
-                    }
-                }
-
-                @Override
-                public void loadFailed(FriendlyException exception) {
-                    logger.error("loadFailed: {}", exception.getMessage());
-                    hook.sendMessage("❌ **Yükleme başarısız:** `" + exception.getMessage() + "`\n" +
-                            "💡 Bu video yüklenemedi. SoundCloud URL veya farklı bir parça dene.").queue();
-                    // Boştaysa ses kanalından çık — sürekli girip çıkmayı engelle
-                    if (manager.player.getPlayingTrack() == null && manager.scheduler.getQueue().isEmpty()) {
-                        guild.getAudioManager().closeAudioConnection();
-                    }
-                }
-            });
-        } catch (Exception e) {
-            // Herhangi bir beklenmedik hata — hook mutlaka yanıtlanmalı
-            logger.error("handlePlay beklenmedik hata: {}", e.getMessage(), e);
-            hook.sendMessage("❌ Beklenmedik hata oluştu: `" + e.getMessage() + "`").queue();
+        // 1. Eğer direkt URL verilmişse (Spotify, SoundCloud, YouTube vb.)
+        if (rawQuery.startsWith("http://") || rawQuery.startsWith("https://")) {
+            loadDirectUrl(guild, hook, vc, rawQuery);
+            return;
         }
+
+        // 2. Metin araması ise: Önce SoundCloud/YouTube üzerinden ara, panel olarak sun!
+        String searchPrefixQuery = "scsearch:" + rawQuery;
+        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
+
+        audioPlayerManager.getPlayerManager().loadItemOrdered(manager, searchPrefixQuery, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                // Tek sonuç döndü
+                if (AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
+                    hook.sendMessage("⚠️ **\"" + track.getInfo().title + "\"** (film/dizi/fragman) olduğu için filtrelendi.").queue();
+                    return;
+                }
+                playTrackImmediately(guild, hook, vc, track);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                if (playlist.isSearchResult()) {
+                    List<AudioTrack> validTracks = new ArrayList<>();
+                    for (AudioTrack t : playlist.getTracks()) {
+                        if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
+                            validTracks.add(t);
+                        }
+                        if (validTracks.size() >= 5) break; // En iyi 5 şarkı
+                    }
+
+                    if (validTracks.isEmpty()) {
+                        hook.sendMessage("⚠️ Arama sonuçlarındaki tüm içerikler film/dizi/fragman olduğu için filtrelendi.").queue();
+                        return;
+                    }
+
+                    if (validTracks.size() == 1) {
+                        playTrackImmediately(guild, hook, vc, validTracks.get(0));
+                        return;
+                    }
+
+                    // ARAMA PANELİ (DROPDOWN SELECT MENU) OLUŞTUR
+                    sendSearchSelectionPanel(hook, rawQuery, validTracks);
+
+                } else {
+                    // Normal Playlist
+                    int added = 0;
+                    for (AudioTrack t : playlist.getTracks()) {
+                        if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
+                            manager.scheduler.queue(t);
+                            added++;
+                        }
+                    }
+                    hook.sendMessage("📃 **" + playlist.getName() + "** — `" + added + "` parça kuyruğa eklendi.").queue();
+                }
+            }
+
+            @Override
+            public void noMatches() {
+                // YouTube ile tekrar dene
+                tryYtSearchFallback(guild, hook, vc, rawQuery);
+            }
+
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                tryYtSearchFallback(guild, hook, vc, rawQuery);
+            }
+        });
+    }
+
+    private void tryYtSearchFallback(Guild guild, InteractionHook hook, VoiceChannel vc, String rawQuery) {
+        String ytQuery = "ytsearch:" + rawQuery;
+        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
+
+        audioPlayerManager.getPlayerManager().loadItemOrdered(manager, ytQuery, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                if (AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
+                    hook.sendMessage("⚠️ Film/dizi/fragman icerigi filtrelendi.").queue();
+                    return;
+                }
+                playTrackImmediately(guild, hook, vc, track);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                if (playlist.isSearchResult()) {
+                    List<AudioTrack> validTracks = new ArrayList<>();
+                    for (AudioTrack t : playlist.getTracks()) {
+                        if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
+                            validTracks.add(t);
+                        }
+                        if (validTracks.size() >= 5) break;
+                    }
+                    if (validTracks.isEmpty()) {
+                        hook.sendMessage("⚠️ Sonuçlar film/dizi/fragman olduğu için filtrelendi.").queue();
+                        return;
+                    }
+                    sendSearchSelectionPanel(hook, rawQuery, validTracks);
+                } else {
+                    for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
+                    hook.sendMessage("📃 Çalma listesi eklendi.").queue();
+                }
+            }
+
+            @Override
+            public void noMatches() {
+                hook.sendMessage("❌ **\"" + rawQuery + "\"** için müzik bulunamadı.").queue();
+            }
+
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                hook.sendMessage("❌ Arama sırasında bir sorun oluştu: `" + exception.getMessage() + "`").queue();
+            }
+        });
+    }
+
+    private void sendSearchSelectionPanel(InteractionHook hook, String query, List<AudioTrack> tracks) {
+        String customId = "song_select:" + UUID.randomUUID().toString().substring(0, 8);
+        searchPanelCache.put(customId, tracks);
+
+        EmbedBuilder eb = new EmbedBuilder()
+                .setTitle("🔎 Arama Sonuçları Panel")
+                .setDescription("💡 **\"" + query + "\"** için bulunan parçalar (Film/Dizi/Fragman filtrelendi):\n\nAşağıdaki listeden çalmak istediğin şarkıyı seç:")
+                .setColor(BOT_COLOR);
+
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create(customId)
+                .setPlaceholder("🎵 Çalınacak şarkıyı seçin...");
+
+        for (int i = 0; i < tracks.size(); i++) {
+            AudioTrack t = tracks.get(i);
+            String title = t.getInfo().title;
+            if (title.length() > 60) title = title.substring(0, 57) + "...";
+            String author = t.getInfo().author;
+            if (author.length() > 30) author = author.substring(0, 27) + "...";
+
+            eb.addField((i + 1) + ". " + title, "👤 " + author + " • ⏱️ " + TrackScheduler.formatDuration(t.getDuration()), false);
+            menuBuilder.addOption((i + 1) + ". " + title, String.valueOf(i), author + " (" + TrackScheduler.formatDuration(t.getDuration()) + ")");
+        }
+
+        menuBuilder.addOption("❌ İptal Et", "cancel", "Aramayı kapatır");
+
+        hook.sendMessageEmbeds(eb.build())
+                .addActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    private void loadDirectUrl(Guild guild, InteractionHook hook, VoiceChannel vc, String url) {
+        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
+
+        audioPlayerManager.getPlayerManager().loadItemOrdered(manager, url, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                if (AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
+                    hook.sendMessage("⚠️ **\"" + track.getInfo().title + "\"** (film/dizi/fragman) filtrelendi.").queue();
+                    return;
+                }
+                playTrackImmediately(guild, hook, vc, track);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                if (playlist.isSearchResult()) {
+                    AudioTrack t = playlist.getTracks().get(0);
+                    playTrackImmediately(guild, hook, vc, t);
+                } else {
+                    int added = 0;
+                    for (AudioTrack t : playlist.getTracks()) {
+                        if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
+                            manager.scheduler.queue(t);
+                            added++;
+                        }
+                    }
+                    hook.sendMessage("📃 **" + playlist.getName() + "** — `" + added + "` parça eklendi.").queue();
+                }
+            }
+
+            @Override
+            public void noMatches() {
+                hook.sendMessage("❌ Bağlantıda çalınabilir ses bulunamadı.").queue();
+            }
+
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                hook.sendMessage("❌ Link yüklenirken hata oluştu: `" + exception.getMessage() + "`").queue();
+            }
+        });
+    }
+
+    private void playTrackImmediately(Guild guild, InteractionHook hook, VoiceChannel vc, AudioTrack track) {
+        AudioManager am = guild.getAudioManager();
+        if (!am.isConnected()) am.openAudioConnection(vc);
+
+        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
+        manager.scheduler.queue(track);
+
+        hook.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
+                "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`").queue();
     }
 
     private void handlePause(SlashCommandInteractionEvent event) {
@@ -328,11 +537,11 @@ public class CommandManager extends ListenerAdapter {
         EmbedBuilder eb = new EmbedBuilder()
                 .setTitle("🎵 Şu An Çalıyor")
                 .setDescription("**" + cur.getInfo().title + "**")
-                .addField("Kanal",  cur.getInfo().author, true)
-                .addField("Süre",   TrackScheduler.formatDuration(cur.getPosition()) + " / " +
+                .addField("Kanal / Sanatçı", cur.getInfo().author, true)
+                .addField("Süre", TrackScheduler.formatDuration(cur.getPosition()) + " / " +
                                     TrackScheduler.formatDuration(cur.getDuration()), true)
-                .addField("Döngü",  m.scheduler.isLoop() ? "🔁 Açık" : "➡️ Kapalı", true)
-                .addField("Ses",    "🔊 " + m.player.getVolume() + "%", true)
+                .addField("Döngü", m.scheduler.isLoop() ? "🔁 Açık" : "➡️ Kapalı", true)
+                .addField("Ses", "🔊 " + m.player.getVolume() + "%", true)
                 .setColor(BOT_COLOR)
                 .setUrl(cur.getInfo().uri);
 
@@ -357,10 +566,6 @@ public class CommandManager extends ListenerAdapter {
         event.replyEmbeds(buildHelpEmbed().build()).queue();
     }
 
-    // ============================
-    // YARDIMCI METODLAR
-    // ============================
-
     private VoiceChannel getVoiceChannel(Member member, TextChannel textChannel) {
         if (member == null) return null;
         GuildVoiceState vs = member.getVoiceState();
@@ -372,55 +577,19 @@ public class CommandManager extends ListenerAdapter {
         return (VoiceChannel) vs.getChannel();
     }
 
-    /** Prefix komutlar için ayrı load metodu */
-    private void loadAndPlayPrefix(Guild guild, TextChannel channel, VoiceChannel vc, String query) {
-        AudioManager am = guild.getAudioManager();
-        if (!am.isConnected()) am.openAudioConnection(vc);
-
-        GuildAudioManager manager = audioPlayerManager.getGuildAudioManager(guild);
-
-        audioPlayerManager.getPlayerManager().loadItemOrdered(manager, query, new AudioLoadResultHandler() {
-            @Override
-            public void trackLoaded(AudioTrack track) {
-                manager.scheduler.queue(track);
-                channel.sendMessage("✅ Kuyruğa eklendi: **" + track.getInfo().title + "**").queue();
-            }
-            @Override
-            public void playlistLoaded(AudioPlaylist playlist) {
-                if (playlist.isSearchResult()) {
-                    AudioTrack t = playlist.getTracks().get(0);
-                    manager.scheduler.queue(t);
-                    channel.sendMessage("🎵 Çalınıyor: **" + t.getInfo().title + "**").queue();
-                } else {
-                    for (AudioTrack t : playlist.getTracks()) manager.scheduler.queue(t);
-                    channel.sendMessage("📃 **" + playlist.getName() + "** — `" +
-                            playlist.getTracks().size() + "` parça eklendi!").queue();
-                }
-            }
-            @Override
-            public void noMatches() {
-                channel.sendMessage("❌ Sonuç bulunamadı: **" + query.replace("ytsearch:", "") + "**").queue();
-            }
-            @Override
-            public void loadFailed(FriendlyException ex) {
-                channel.sendMessage("❌ Yükleme hatası: `" + ex.getMessage() + "`").queue();
-            }
-        });
-    }
-
     private EmbedBuilder buildHelpEmbed() {
         return new EmbedBuilder()
                 .setTitle("🎵 Fluir Ses Sistemi — Komutlar")
                 .setDescription("Slash komutları (`/`) veya prefix (`!`) kullanabilirsin.")
-                .addField("🎵 Çalma",
-                        "`/çal <URL/arama>` • `!çal`\n`/dur` • `!dur`\n`/atla` • `!atla`\n`/durdur` • `!durdur`", false)
-                .addField("📋 Kuyruk",
-                        "`/kuyruk`\n`/karistir`\n`/temizle` • `!temizle`", false)
+                .addField("🎵 Çalma & Arama",
+                        "`/çal <sorgu>` • Arama paneli açar, Spotify/SoundCloud/YouTube destekler\n`/dur` • Duraklat/Devam\n`/atla` • Sonraki parça\n`/durdur` • Çıkış yap", false)
+                .addField("📋 Panel & Kuyruk",
+                        "`/kuyruk` • Sıradakileri gör\n`/karistir` • Karıştır\n`/temizle` • Temizle", false)
                 .addField("⚙️ Ayarlar",
-                        "`/ses <0-150>` • `!ses 80`\n`/döngü` • `!döngü`\n`/simdi`", false)
-                .addField("🌐 Desteklenen Kaynaklar",
-                        "YouTube • SoundCloud • Twitch • Vimeo • Bandcamp • HTTP ses", false)
+                        "`/ses <0-150>` • Ses ayarla\n`/döngü` • Döngü\n`/simdi` • Şu an çalan", false)
+                .addField("🛡️ Filtreler & Desteği",
+                        "Film, dizi, fragman ve teaser videoları otomatik engellenir.", false)
                 .setColor(BOT_COLOR)
-                .setFooter("Fluir Ses Sistemi | JDA + LavaPlayer");
+                .setFooter("Fluir Ses Sistemi | Spotify + SoundCloud + JDA");
     }
 }
