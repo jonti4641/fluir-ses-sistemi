@@ -42,15 +42,15 @@ class PlaybackFallbackAndCircuitBreakerTest {
         SoundCloudCircuitBreaker.reset();
 
         lenient().when(mockGuild.getIdLong()).thenReturn(999888777L);
-        lenient().when(track1.getInfo()).thenReturn(new AudioTrackInfo("Test Şarkı", "Test Sanatçı", 180000, "1", false, "https://soundcloud.com/test"));
-        lenient().when(track2.getInfo()).thenReturn(new AudioTrackInfo("Şarkı 2", "Sanatçı 2", 200000, "2", false, "https://youtube.com/watch?v=2"));
+        lenient().when(track1.getInfo()).thenReturn(new AudioTrackInfo("Bixi Blake & Kum - Obsession", "Bixi Blake", 180000, "1", false, "https://youtube.com/watch?v=1"));
+        lenient().when(track2.getInfo()).thenReturn(new AudioTrackInfo("Şarkı 2", "Sanatçı 2", 200000, "2", false, "https://soundcloud.com/test"));
 
         lenient().when(track1.makeClone()).thenReturn(track1);
         lenient().when(track2.makeClone()).thenReturn(track2);
     }
 
     @Test
-    @DisplayName("1. SoundCloud 404 hatasında Türkçe hata mesajı üretilmelidir ve raw exception mesajı gizlenmelidir")
+    @DisplayName("1. SoundCloud 404 hatasında Türkçe hata mesajı üretilmeli ve raw exception gizlenmelidir")
     void testFriendlyErrorMessageMapping() {
         FriendlyException soundCloud404 = new FriendlyException("Something broke when playing the track", FriendlyException.Severity.COMMON, new java.io.IOException("Invalid status code for soundcloud stream: 404"));
         String msg = MusicPlaybackService.getFriendlyErrorMessage(soundCloud404);
@@ -88,15 +88,15 @@ class PlaybackFallbackAndCircuitBreakerTest {
     }
 
     @Test
-    @DisplayName("4. Aynı parça için en fazla 1 kez fallback yapılmalıdır")
+    @DisplayName("4. Aynı parça için en fazla MAX_PLAYBACK_FALLBACK_ATTEMPTS kez fallback yapılmalıdır")
     void testSingleFallbackAttemptPerTrack() {
-        TrackContext initial = TrackContext.create("Sorgu", "Şarkı", "Sanatçı", PlaybackSource.SOUNDCLOUD, 1L, 1L);
+        TrackContext initial = TrackContext.create("Sorgu", "Şarkı", "Sanatçı", PlaybackSource.YOUTUBE, 1L, 1L);
         assertEquals(0, initial.fallbackAttempt());
 
-        TrackContext firstFallback = initial.withAttempt(PlaybackSource.YOUTUBE);
+        TrackContext firstFallback = initial.withAttempt(PlaybackSource.SOUNDCLOUD);
         assertEquals(1, firstFallback.fallbackAttempt());
-        assertTrue(firstFallback.attemptedSources().contains(PlaybackSource.YOUTUBE));
         assertTrue(firstFallback.attemptedSources().contains(PlaybackSource.SOUNDCLOUD));
+        assertTrue(firstFallback.attemptedSources().contains(PlaybackSource.YOUTUBE));
     }
 
     @Test
@@ -116,5 +116,13 @@ class PlaybackFallbackAndCircuitBreakerTest {
         if (resolved != null) {
             assertFalse(resolved.startsWith("scsearch:"));
         }
+    }
+
+    @Test
+    @DisplayName("7. Detaylı stack trace ve cause zinciri loglama çağrısı hata vermeden çalışmalıdır")
+    void testLogDetailedExceptionDoesNotThrow() {
+        FriendlyException nestedException = new FriendlyException("Oynatma hatası", FriendlyException.Severity.COMMON,
+                new java.io.IOException("Stream kapandı", new java.lang.RuntimeException("Root cause")));
+        assertDoesNotThrow(() -> MusicPlaybackService.logDetailedException(org.slf4j.LoggerFactory.getLogger("TestLogger"), 999L, track1, nestedException));
     }
 }

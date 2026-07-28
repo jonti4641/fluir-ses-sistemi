@@ -8,8 +8,8 @@ import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceM
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
-import dev.lavalink.youtube.clients.Music;
-import dev.lavalink.youtube.clients.Web;
+import dev.lavalink.youtube.clients.*;
+import dev.lavalink.youtube.clients.skeleton.Client;
 import net.dv8tion.jda.api.entities.Guild;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,17 +37,34 @@ public class AudioPlayerManager {
     }
 
     private void registerSources() {
-        // 1. Birincil Kaynak: YouTube (Music + Web client)
+        // 1. Birincil Kaynak: YouTube Çoklu İstemci Yapılandırması (Music -> Android -> Ios -> TvHtml5Embedded -> Web)
         try {
-            YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(
-                    true,
+            Client[] youtubeClients = new Client[] {
                     new Music(),
+                    new Android(),
+                    new Ios(),
+                    new TvHtml5Embedded(),
                     new Web()
-            );
+            };
+
+            logger.info("=========================================");
+            logger.info("📺 YouTube İstemcileri Başlatılıyor:");
+            for (Client c : youtubeClients) {
+                ClientOptions opts = c.getOptions();
+                logger.info("  • Client [{}] | Playback: {} | VideoLoading: {} | PlaylistLoading: {} | Searching: {}",
+                        c.getIdentifier(),
+                        opts.getPlayback(),
+                        opts.getVideoLoading(),
+                        opts.getPlaylistLoading(),
+                        opts.getSearching());
+            }
+            logger.info("=========================================");
+
+            YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(true, youtubeClients);
             playerManager.registerSourceManager(youtube);
-            logger.info("✅ YouTube kaynağı birincil olarak kayıt edildi (Music + Web).");
+            logger.info("✅ YouTube çoklu istemci kaynağı birincil olarak kayıt edildi.");
         } catch (Exception e) {
-            logger.warn("⚠️ YouTube kaynağı yüklenemedi: {}", e.getMessage());
+            logger.warn("⚠️ YouTube kaynağı yüklenemedi: {}", e.getMessage(), e);
         }
 
         // 2. İkincil Kaynak: SoundCloud

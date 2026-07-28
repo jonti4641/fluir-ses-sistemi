@@ -15,7 +15,6 @@ import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,7 +27,7 @@ public class MusicPlaybackService {
     private static final Logger logger = LoggerFactory.getLogger(MusicPlaybackService.class);
     private static final Color BOT_COLOR = new Color(88, 101, 242);
     public static final int MAX_PLAYLIST_TRACKS = 100;
-    public static final int MAX_PLAYBACK_FALLBACK_ATTEMPTS = 1;
+    public static final int MAX_PLAYBACK_FALLBACK_ATTEMPTS = 2;
 
     private final AudioPlayerManager audioPlayerManager;
 
@@ -53,7 +52,6 @@ public class MusicPlaybackService {
         // 2. Eğer URL veya ön ek değilse varsayılan birincil kaynak YouTube (ytsearch:) olarak belirlenir
         final boolean isUrl = processedQuery.startsWith("http://") || processedQuery.startsWith("https://");
         if (!isUrl && !processedQuery.startsWith("scsearch:") && !processedQuery.startsWith("ytsearch:")) {
-            // SoundCloud devre kesici açık mı kontrol et
             if (SoundCloudCircuitBreaker.isOpen()) {
                 logger.info("⚡ SoundCloud devresi açık olduğu için arama doğrudan YouTube'dan yapılıyor.");
                 processedQuery = "ytsearch:" + processedQuery;
@@ -170,11 +168,10 @@ public class MusicPlaybackService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                logger.error("❌ [Guild: {}] Yükleme hatası [{}]: {}", guild.getId(), finalQuery, exception.getMessage());
-                // Fallback (Tek Seferlik: YouTube -> SoundCloud)
+                logDetailedException(logger, guild.getIdLong(), null, exception);
                 if (!isFallback && finalQuery.startsWith("ytsearch:") && !SoundCloudCircuitBreaker.isOpen()) {
                     String fallbackQuery = "scsearch:" + rawQuery;
-                    logger.info("🔄 [Guild: {}] YouTube hatası. SoundCloud fallback deneniyor: {}", guild.getId(), fallbackQuery);
+                    logger.info("🔄 [Guild: {}] YouTube yükleme hatası. SoundCloud fallback deneniyor: {}", guild.getId(), fallbackQuery);
                     processPlayRequest(guild, targetChannel, messageChannel, hook, fallbackQuery, true);
                     return;
                 }
@@ -185,9 +182,11 @@ public class MusicPlaybackService {
     }
 
     /**
-     * Oynatma esnasında (onTrackException) oluşan SoundCloud / Stream 404 hataları için çalışma zamanı (runtime) fallback işlemi.
+     * Oynatma esnasında (onTrackException) oluşan yürütme hataları için çalışma zamanı (runtime) fallback işlemi.
      */
     public void handleRuntimePlaybackFallback(GuildAudioSession session, AudioTrack failedTrack, FriendlyException exception) {
+        logDetailedException(logger, session.getGuildId(), failedTrack, exception);
+
         TrackContext context = (TrackContext) failedTrack.getUserData();
         long currentGen = session.getPlaybackGeneration();
 
@@ -200,7 +199,7 @@ public class MusicPlaybackService {
             SoundCloudCircuitBreaker.recordFailure();
         }
 
-        // Fallback deneme sınırı ve tekrar eden kaynak kontrolü
+        // Fallback deneme kısıtlaması
         PlaybackSource targetSource = (context.source() == PlaybackSource.SOUNDCLOUD || isSoundCloud404(exception))
                 ? PlaybackSource.YOUTUBE
                 : PlaybackSource.SOUNDCLOUD;
@@ -260,6 +259,57 @@ public class MusicPlaybackService {
                 session.getScheduler().advanceQueueAfterException();
             }
         });
+    }
+
+    public static void logDetailedException(Logger logger, long guildId, AudioTrack track, FriendlyException exception) {
+        TrackContext context = track != null ? (TrackContext) track.getUserData() : null;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n=================== ❌ DETAYLI YÜRÜTME HATASI ❌ ===================\n");
+        sb.append("Sunucu (Guild ID)    : ").append(guildId).append("\n");
+        sb.append("Parça Başlığı         : ").append(track != null ? track.getInfo().title : "Bilinmiyor").append("\n");
+        sb.append("Parça URI             : ").append(track != null ? sanitizeUri(track.getInfo().uri) : "Bilinmiyor").append("\n");
+        sb.append("Hata Derecesi (Sev)   : ").append(exception != null ? exception.severity : "Bilinmiyor").append("\n");
+
+        if (context != null) {
+            sb.append("Kaynak Türü           : ").append(context.source()).append("\n");
+            sb.append("Denenmiş Kaynaklar    : ").append(context.attemptedSources()).append("\n");
+            sb.append("Denenmiş İstemciler   : ").append(context.attemptedClients()).append("\n");
+            sb.append("Orijinal Sorgu        : ").append(context.originalQuery()).append("\n");
+            sb.append("Fallback Deneme Sayısı : ").append(context.fallbackAttempt()).append("\n");
+        }
+
+        if (exception != null) {
+            sb.append("Hata Mesajı           : ").append(exception.getMessage()).append("\n");
+            sb.append("--- Exception Cause Zinciri ---\n");
+            Throwable current = exception.getCause();
+            int depth = 1;
+            while (current != null) {
+                sb.append("  [Cause #").append(depth++).append("] ")
+                  .append(current.getClass().getName()).append(": ")
+                  .append(current.getMessage()).append("\n");
+                current = current.getCause();
+            }
+        }
+        sb.append("====================================================================");
+
+        logger.error("❌ [Guild: {}] Parça yürütme hatası | title={} | uri={} | severity={}",
+                guildId,
+                track != null ? track.getInfo().title : "N/A",
+                track != null ? sanitizeUri(track.getInfo().uri) : "N/A",
+                exception != null ? exception.severity : "N/A",
+                exception);
+
+        logger.error(sb.toString());
+    }
+
+    private static String sanitizeUri(String uri) {
+        if (uri == null) return "N/A";
+        int queryIndex = uri.indexOf("?");
+        if (queryIndex != -1 && (uri.contains("expire=") || uri.contains("signature="))) {
+            return uri.substring(0, queryIndex) + "?[SENSITIVE_PARAMS_REMOVED]";
+        }
+        return uri;
     }
 
     public static String getFriendlyErrorMessage(FriendlyException exception) {
