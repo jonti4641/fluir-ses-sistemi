@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 /**
  * Spotify oEmbed API ile Spotify bağlantılarını (track/album/playlist)
  * başlık ve sanatçı adına dönüştüren ultra hızlı ve bağımsız çözümleyici.
- * API anahtarı veya üçüncü taraf Maven bağımlılığı gerektirmez.
+ * Not: Spotify desteği yalnızca metadata çözümleme işlemidir. Müzikler SoundCloud (scsearch:) üzerinden aratılır.
  */
 public class SpotifyResolver {
 
@@ -54,7 +54,7 @@ public class SpotifyResolver {
                     if (author != null) author = unescapeJson(author);
 
                     String searchQuery = (author != null ? author + " - " : "") + title;
-                    logger.info("🟢 Spotify URL çözümlendi: {} -> {}", spotifyUrl, searchQuery);
+                    logger.info("🟢 Spotify URL metadata çözümlendi (SoundCloud aramasına aktarılacak): {} -> {}", spotifyUrl, searchQuery);
                     return searchQuery;
                 }
             }

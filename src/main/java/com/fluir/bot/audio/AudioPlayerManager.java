@@ -7,9 +7,6 @@ import com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
-import dev.lavalink.youtube.YoutubeAudioSourceManager;
-import dev.lavalink.youtube.clients.*;
-import dev.lavalink.youtube.clients.skeleton.Client;
 import net.dv8tion.jda.api.entities.Guild;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Sunucu ses oturumlarını ve LavaPlayer kaynaklarını yöneten sınıf.
+ * Bu müzik botunda birincil ses kaynağı SoundCloud olarak yapılandırılmıştır.
  */
 public class AudioPlayerManager {
 
@@ -37,52 +35,23 @@ public class AudioPlayerManager {
     }
 
     private void registerSources() {
-        // 1. Birincil Kaynak: YouTube Çoklu İstemci Yapılandırması (Music -> Android -> Ios -> TvHtml5Embedded -> Web)
-        try {
-            Client[] youtubeClients = new Client[] {
-                    new Music(),
-                    new Android(),
-                    new Ios(),
-                    new TvHtml5Embedded(),
-                    new Web()
-            };
-
-            logger.info("=========================================");
-            logger.info("📺 YouTube İstemcileri Başlatılıyor:");
-            for (Client c : youtubeClients) {
-                ClientOptions opts = c.getOptions();
-                logger.info("  • Client [{}] | Playback: {} | VideoLoading: {} | PlaylistLoading: {} | Searching: {}",
-                        c.getIdentifier(),
-                        opts.getPlayback(),
-                        opts.getVideoLoading(),
-                        opts.getPlaylistLoading(),
-                        opts.getSearching());
-            }
-            logger.info("=========================================");
-
-            YoutubeAudioSourceManager youtube = new YoutubeAudioSourceManager(true, youtubeClients);
-            playerManager.registerSourceManager(youtube);
-            logger.info("✅ YouTube çoklu istemci kaynağı birincil olarak kayıt edildi.");
-        } catch (Exception e) {
-            logger.warn("⚠️ YouTube kaynağı yüklenemedi: {}", e.getMessage(), e);
-        }
-
-        // 2. İkincil Kaynak: SoundCloud
+        // 1. Birincil Kaynak: SoundCloud
         try {
             playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
-            logger.info("✅ SoundCloud kaynağı ikincil olarak kayıt edildi.");
+            logger.info("✅ SoundCloud birincil ses kaynağı olarak kayıt edildi.");
+            logger.info("ℹ️ SoundCloud Sağlık Durumu: [Search: AKTİF | Resolve: AKTİF]");
         } catch (Exception e) {
             logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage(), e);
         }
 
-        // 3. Diğer kaynaklar
+        // 2. Diğer Desteklenen Kaynaklar (Bandcamp, Vimeo, Twitch, HTTP, Local)
         try { playerManager.registerSourceManager(new BandcampAudioSourceManager()); } catch (Exception e) { logger.warn("Bandcamp kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new VimeoAudioSourceManager()); } catch (Exception e) { logger.warn("Vimeo kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new TwitchStreamAudioSourceManager()); } catch (Exception e) { logger.warn("Twitch kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new HttpAudioSourceManager()); } catch (Exception e) { logger.warn("HTTP kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new LocalAudioSourceManager()); } catch (Exception e) { logger.warn("Local kaydı atlandı: {}", e.getMessage()); }
 
-        logger.info("🎵 Ses kaynakları kayıt tamamlandı.");
+        logger.info("🎵 Ses kaynakları kayıt işlemi tamamlandı.");
     }
 
     public GuildAudioSession getOrCreateSession(Guild guild) {

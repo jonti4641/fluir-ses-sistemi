@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
 
     <name>Fluir Ses Sistemi</name>
-    <description>Discord Ses Sistemi Botu - JDA + LavaPlayer</description>
+    <description>Discord Ses Sistemi Botu - JDA + LavaPlayer (SoundCloud)</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -18,7 +18,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jda.version>5.2.1</jda.version>
         <lavaplayer.version>2.2.2</lavaplayer.version>
-        <youtube.source.version>1.13.0</youtube.source.version>
         <junit.version>5.10.2</junit.version>
         <mockito.version>5.11.0</mockito.version>
     </properties>
@@ -65,13 +64,6 @@
             <groupId>dev.arbjerg</groupId>
             <artifactId>lavaplayer</artifactId>
             <version>${lavaplayer.version}</version>
-        </dependency>
-
-        <!-- YouTube Source - LavaPlayer için güncel YouTube desteği -->
-        <dependency>
-            <groupId>dev.lavalink.youtube</groupId>
-            <artifactId>v2</artifactId>
-            <version>${youtube.source.version}</version>
         </dependency>
 
         <!-- Opus ses codec -->

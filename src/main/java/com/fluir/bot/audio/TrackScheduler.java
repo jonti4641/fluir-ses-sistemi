@@ -107,7 +107,7 @@ public class TrackScheduler extends AudioEventAdapter {
             isHandlingException.set(false);
             this.currentTrack = fallbackTrack;
             player.startTrack(fallbackTrack, false);
-            logger.info("🔄 [Guild: {}] Fallback parçası başlatıldı: {}", session.getGuildId(), fallbackTrack.getInfo().title);
+            logger.info("🔄 [Guild: {}] Re-resolved SoundCloud parçası başlatıldı: {}", session.getGuildId(), fallbackTrack.getInfo().title);
         } finally {
             schedulerLock.unlock();
         }
@@ -134,7 +134,7 @@ public class TrackScheduler extends AudioEventAdapter {
             GuildMessageChannel announcementChannel = session.getLastMessageChannel();
             if (announcementChannel != null) {
                 announcementChannel.sendMessage(
-                        "🎵 **Parça başlatılıyor:** `" + track.getInfo().title + "`\n" +
+                        "⏳ **Parça hazırlanıyor:** `" + track.getInfo().title + "`\n" +
                         "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + formatDuration(track.getDuration()) + "`"
                 ).queue(null, err -> logger.warn("Duyuru mesajı gönderilemedi: {}", err.getMessage()));
             }

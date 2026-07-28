@@ -20,14 +20,13 @@ import java.util.UUID;
 
 /**
  * Slash, Prefix ve Panel işlemlerinin tümünün kullandığı merkezi oynatma servisi.
- * Varsayılan arama birincil olarak YouTube (ytsearch:) üzerinden gerçekleştirilir.
+ * Birincil arama SoundCloud (scsearch:) üzerinden yürütülür. YouTube desteklenmez.
  */
 public class MusicPlaybackService {
 
     private static final Logger logger = LoggerFactory.getLogger(MusicPlaybackService.class);
     private static final Color BOT_COLOR = new Color(88, 101, 242);
     public static final int MAX_PLAYLIST_TRACKS = 100;
-    public static final int MAX_PLAYBACK_FALLBACK_ATTEMPTS = 2;
 
     private final AudioPlayerManager audioPlayerManager;
 
@@ -41,23 +40,34 @@ public class MusicPlaybackService {
     public void processPlayRequest(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel, InteractionHook hook, String rawQuery, boolean isFallback) {
         String processedQuery = rawQuery.trim();
 
-        // 1. Spotify URL kontrolü -> YouTube aramasına dönüştürülür
+        // 1. YouTube bağlantısı kontrolü -> Doğrudan reddedilir
+        if (isYouTubeUrlOrQuery(processedQuery)) {
+            sendResponse(hook, messageChannel, "❌ YouTube bağlantıları bu müzik sisteminde desteklenmiyor.");
+            return;
+        }
+
+        // 2. Spotify URL kontrolü -> SoundCloud (scsearch:) aramasına dönüştürülür
         if (processedQuery.contains("spotify.com")) {
             String resolved = SpotifyResolver.resolveSpotifyUrl(processedQuery);
             if (resolved != null) {
-                processedQuery = "ytsearch:" + resolved + " official audio";
+                processedQuery = "scsearch:" + resolved;
+            } else {
+                sendResponse(hook, messageChannel, "❌ Spotify bağlantısı çözümlenemedi.");
+                return;
             }
         }
 
-        // 2. Eğer URL veya ön ek değilse varsayılan birincil kaynak YouTube (ytsearch:) olarak belirlenir
+        // 3. Varsayılan arama ön eki: SoundCloud (scsearch:)
         final boolean isUrl = processedQuery.startsWith("http://") || processedQuery.startsWith("https://");
-        if (!isUrl && !processedQuery.startsWith("scsearch:") && !processedQuery.startsWith("ytsearch:")) {
-            if (SoundCloudCircuitBreaker.isOpen()) {
-                logger.info("⚡ SoundCloud devresi açık olduğu için arama doğrudan YouTube'dan yapılıyor.");
-                processedQuery = "ytsearch:" + processedQuery;
-            } else {
-                processedQuery = "ytsearch:" + processedQuery;
-            }
+        if (!isUrl && !processedQuery.startsWith("scsearch:")) {
+            processedQuery = "scsearch:" + processedQuery;
+        }
+
+        // SoundCloud Circuit Breaker kontrolü
+        if (SoundCloudCircuitBreaker.isOpen()) {
+            logger.warn("⚡ SoundCloud circuit açık olduğu için istek reddediliyor.");
+            sendResponse(hook, messageChannel, "❌ SoundCloud oynatma hizmeti geçici olarak kullanılamıyor.");
+            return;
         }
 
         final String finalQuery = processedQuery;
@@ -81,8 +91,8 @@ public class MusicPlaybackService {
                     return;
                 }
 
-                // TrackContext ataması
-                TrackContext context = TrackContext.create(rawQuery, track.getInfo().title, track.getInfo().author, source, userId, channelId);
+                // TrackContext ataması (Kalıcı URI kaydedilir)
+                TrackContext context = TrackContext.create(rawQuery, track.getInfo().title, track.getInfo().author, track.getInfo().uri, source, userId, channelId);
                 track.setUserData(context);
 
                 // Parça hazır! Şimdi güvenli biçimde bağlan
@@ -103,7 +113,7 @@ public class MusicPlaybackService {
                     List<AudioTrack> validTracks = new ArrayList<>();
                     for (AudioTrack t : playlist.getTracks()) {
                         if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
-                            TrackContext context = TrackContext.create(rawQuery, t.getInfo().title, t.getInfo().author, source, userId, channelId);
+                            TrackContext context = TrackContext.create(rawQuery, t.getInfo().title, t.getInfo().author, t.getInfo().uri, source, userId, channelId);
                             t.setUserData(context);
                             validTracks.add(t);
                         }
@@ -142,7 +152,7 @@ public class MusicPlaybackService {
                     for (AudioTrack t : playlist.getTracks()) {
                         if (addedCount >= MAX_PLAYLIST_TRACKS) break;
                         if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
-                            TrackContext context = TrackContext.create(playlist.getName(), t.getInfo().title, t.getInfo().author, source, userId, channelId);
+                            TrackContext context = TrackContext.create(playlist.getName(), t.getInfo().title, t.getInfo().author, t.getInfo().uri, source, userId, channelId);
                             t.setUserData(context);
                             session.getScheduler().queue(t);
                             addedCount++;
@@ -155,34 +165,20 @@ public class MusicPlaybackService {
 
             @Override
             public void noMatches() {
-                // Birincil (YouTube) arama başarısız olduysa SoundCloud fallback denenir (eğer devre açık değilse)
-                if (!isFallback && finalQuery.startsWith("ytsearch:") && !SoundCloudCircuitBreaker.isOpen()) {
-                    String fallbackQuery = "scsearch:" + rawQuery;
-                    logger.info("🔄 [Guild: {}] YouTube eşleşmedi. SoundCloud fallback deneniyor: {}", guild.getId(), fallbackQuery);
-                    processPlayRequest(guild, targetChannel, messageChannel, hook, fallbackQuery, true);
-                    return;
-                }
-
-                sendResponse(hook, messageChannel, "❌ **\"" + rawQuery + "\"** için sonuç bulunamadı.");
+                sendResponse(hook, messageChannel, "❌ **\"" + rawQuery + "\"** için SoundCloud üzerinde sonuç bulunamadı.");
             }
 
             @Override
             public void loadFailed(FriendlyException exception) {
                 logDetailedException(logger, guild.getIdLong(), null, exception);
-                if (!isFallback && finalQuery.startsWith("ytsearch:") && !SoundCloudCircuitBreaker.isOpen()) {
-                    String fallbackQuery = "scsearch:" + rawQuery;
-                    logger.info("🔄 [Guild: {}] YouTube yükleme hatası. SoundCloud fallback deneniyor: {}", guild.getId(), fallbackQuery);
-                    processPlayRequest(guild, targetChannel, messageChannel, hook, fallbackQuery, true);
-                    return;
-                }
-
                 sendResponse(hook, messageChannel, getFriendlyErrorMessage(exception));
             }
         });
     }
 
     /**
-     * Oynatma esnasında (onTrackException) oluşan yürütme hataları için çalışma zamanı (runtime) fallback işlemi.
+     * Oynatma esnasında (onTrackException) oluşan SoundCloud 404 hatalarında
+     * parçayı kalıcı URI üzerinden yeniden çözümleyip (re-resolve) devam ettiren kurtarma metodu.
      */
     public void handleRuntimePlaybackFallback(GuildAudioSession session, AudioTrack failedTrack, FriendlyException exception) {
         logDetailedException(logger, session.getGuildId(), failedTrack, exception);
@@ -191,55 +187,57 @@ public class MusicPlaybackService {
         long currentGen = session.getPlaybackGeneration();
 
         if (context == null) {
-            context = TrackContext.create(failedTrack.getInfo().title, failedTrack.getInfo().title, failedTrack.getInfo().author, determineSourceFromUri(failedTrack.getInfo().uri), 0L, 0L);
+            context = TrackContext.create(failedTrack.getInfo().title, failedTrack.getInfo().title, failedTrack.getInfo().author, failedTrack.getInfo().uri, PlaybackSource.SOUNDCLOUD, 0L, 0L);
         }
 
-        // SoundCloud hatası kaydı (Circuit Breaker)
-        if (context.source() == PlaybackSource.SOUNDCLOUD || isSoundCloud404(exception)) {
-            SoundCloudCircuitBreaker.recordFailure();
-        }
+        // SoundCloud hatasını Circuit Breaker'a bildir
+        SoundCloudCircuitBreaker.recordFailure();
 
-        // Fallback deneme kısıtlaması
-        PlaybackSource targetSource = (context.source() == PlaybackSource.SOUNDCLOUD || isSoundCloud404(exception))
-                ? PlaybackSource.YOUTUBE
-                : PlaybackSource.SOUNDCLOUD;
-
-        if (context.fallbackAttempt() >= MAX_PLAYBACK_FALLBACK_ATTEMPTS || context.attemptedSources().contains(targetSource) || (targetSource == PlaybackSource.SOUNDCLOUD && SoundCloudCircuitBreaker.isOpen())) {
-            logger.warn("⚠️ [Guild: {}] Fallback sınırı aşıldı veya alternatif kaynak devre dışı. Sıradaki parçaya geçiliyor.", session.getGuildId());
-            sendChannelMessage(session.getLastMessageChannel(), getFriendlyErrorMessage(exception));
+        if (SoundCloudCircuitBreaker.isOpen()) {
+            logger.warn("⚡ SoundCloud circuit opened after consecutive failures. Queue advancing.");
+            sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud oynatma hizmeti geçici olarak kullanılamıyor.");
             session.getScheduler().advanceQueueAfterException();
             return;
         }
 
-        // Alternatif sorgu hazırlığı
-        String author = failedTrack.getInfo().author != null ? failedTrack.getInfo().author : "";
-        String title = failedTrack.getInfo().title != null ? failedTrack.getInfo().title : "";
-        String searchQuery = targetSource == PlaybackSource.YOUTUBE
-                ? "ytsearch:" + author + " " + title + " official audio"
-                : "scsearch:" + author + " " + title;
+        // Zaten 1 kez re-resolve edildiyse 2. kez denenmez (sonsuz döngü koruması)
+        if (context.isReResolved()) {
+            logger.warn("⚠️ [Guild: {}] Parça zaten re-resolve edildi fakat tekrar 404 verdi. Sıradaki parçaya geçiliyor.", session.getGuildId());
+            sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
+            session.getScheduler().advanceQueueAfterException();
+            return;
+        }
 
-        final TrackContext nextContext = context.withAttempt(targetSource);
+        String permanentUri = context.permanentUri() != null ? context.permanentUri() : failedTrack.getInfo().uri;
+        if (permanentUri == null || permanentUri.isBlank()) {
+            sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
+            session.getScheduler().advanceQueueAfterException();
+            return;
+        }
 
-        sendChannelMessage(session.getLastMessageChannel(), "⚠️ **" + (context.source() == PlaybackSource.SOUNDCLOUD ? "SoundCloud" : "YouTube") + "** bağlantısı çalışmadığı için parça alternatif kaynak üzerinden yeniden başlatılıyor...");
+        final TrackContext reResolvedContext = context.markReResolved();
 
-        audioPlayerManager.getPlayerManager().loadItemOrdered(session, searchQuery, new AudioLoadResultHandler() {
+        sendChannelMessage(session.getLastMessageChannel(), "⚠️ SoundCloud bağlantısı yenileniyor, parça tekrar deneniyor...");
+
+        // Kalıcı sayfa URI'si üzerinden taze AudioTrack yüklemesi
+        audioPlayerManager.getPlayerManager().loadItemOrdered(session, permanentUri, new AudioLoadResultHandler() {
             @Override
-            public void trackLoaded(AudioTrack fallbackTrack) {
+            public void trackLoaded(AudioTrack freshTrack) {
                 if (session.getPlaybackGeneration() != currentGen || session.isDestroyed()) {
-                    logger.info("ℹ️ [Guild: {}] Manuel skip/stop yapıldığı için fallback iptal edildi.", session.getGuildId());
+                    logger.info("ℹ️ [Guild: {}] Manuel skip/stop yapıldığı için re-resolve iptal edildi.", session.getGuildId());
                     return;
                 }
-                fallbackTrack.setUserData(nextContext);
-                session.getScheduler().startFallbackTrack(fallbackTrack);
+                freshTrack.setUserData(reResolvedContext);
+                session.getScheduler().startFallbackTrack(freshTrack);
             }
 
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (session.getPlaybackGeneration() != currentGen || session.isDestroyed()) return;
                 if (!playlist.getTracks().isEmpty()) {
-                    AudioTrack fallbackTrack = playlist.getTracks().get(0);
-                    fallbackTrack.setUserData(nextContext);
-                    session.getScheduler().startFallbackTrack(fallbackTrack);
+                    AudioTrack freshTrack = playlist.getTracks().get(0);
+                    freshTrack.setUserData(reResolvedContext);
+                    session.getScheduler().startFallbackTrack(freshTrack);
                 } else {
                     noMatches();
                 }
@@ -248,14 +246,14 @@ public class MusicPlaybackService {
             @Override
             public void noMatches() {
                 if (session.getPlaybackGeneration() != currentGen || session.isDestroyed()) return;
-                sendChannelMessage(session.getLastMessageChannel(), "❌ Bu parça şu anda kullanılabilir kaynaklardan oynatılamıyor.");
+                sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
                 session.getScheduler().advanceQueueAfterException();
             }
 
             @Override
             public void loadFailed(FriendlyException ex) {
                 if (session.getPlaybackGeneration() != currentGen || session.isDestroyed()) return;
-                sendChannelMessage(session.getLastMessageChannel(), "❌ Bu parça şu anda kullanılabilir kaynaklardan oynatılamıyor.");
+                sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
                 session.getScheduler().advanceQueueAfterException();
             }
         });
@@ -265,18 +263,16 @@ public class MusicPlaybackService {
         TrackContext context = track != null ? (TrackContext) track.getUserData() : null;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("\n=================== ❌ DETAYLI YÜRÜTME HATASI ❌ ===================\n");
+        sb.append("\n=================== ❌ DETAYLI SOUNDCLOUD HATASI ❌ ===================\n");
         sb.append("Sunucu (Guild ID)    : ").append(guildId).append("\n");
         sb.append("Parça Başlığı         : ").append(track != null ? track.getInfo().title : "Bilinmiyor").append("\n");
-        sb.append("Parça URI             : ").append(track != null ? sanitizeUri(track.getInfo().uri) : "Bilinmiyor").append("\n");
+        sb.append("Kalıcı Page URI       : ").append(track != null ? sanitizeUri(track.getInfo().uri) : "Bilinmiyor").append("\n");
         sb.append("Hata Derecesi (Sev)   : ").append(exception != null ? exception.severity : "Bilinmiyor").append("\n");
 
         if (context != null) {
             sb.append("Kaynak Türü           : ").append(context.source()).append("\n");
-            sb.append("Denenmiş Kaynaklar    : ").append(context.attemptedSources()).append("\n");
-            sb.append("Denenmiş İstemciler   : ").append(context.attemptedClients()).append("\n");
+            sb.append("Re-Resolved Durumu    : ").append(context.isReResolved()).append("\n");
             sb.append("Orijinal Sorgu        : ").append(context.originalQuery()).append("\n");
-            sb.append("Fallback Deneme Sayısı : ").append(context.fallbackAttempt()).append("\n");
         }
 
         if (exception != null) {
@@ -293,7 +289,7 @@ public class MusicPlaybackService {
         }
         sb.append("====================================================================");
 
-        logger.error("❌ [Guild: {}] Parça yürütme hatası | title={} | uri={} | severity={}",
+        logger.error("❌ [Guild: {}] SoundCloud yürütme hatası | title={} | uri={} | severity={}",
                 guildId,
                 track != null ? track.getInfo().title : "N/A",
                 track != null ? sanitizeUri(track.getInfo().uri) : "N/A",
@@ -306,8 +302,8 @@ public class MusicPlaybackService {
     private static String sanitizeUri(String uri) {
         if (uri == null) return "N/A";
         int queryIndex = uri.indexOf("?");
-        if (queryIndex != -1 && (uri.contains("expire=") || uri.contains("signature="))) {
-            return uri.substring(0, queryIndex) + "?[SENSITIVE_PARAMS_REMOVED]";
+        if (queryIndex != -1) {
+            return uri.substring(0, queryIndex);
         }
         return uri;
     }
@@ -320,42 +316,33 @@ public class MusicPlaybackService {
         String causeMsg = cause != null && cause.getMessage() != null ? cause.getMessage().toLowerCase() : "";
 
         if (msg.contains("404") || causeMsg.contains("404") || msg.contains("soundcloud stream")) {
-            return "⚠️ SoundCloud bağlantısı geçersiz olduğu için alternatif kaynak deneniyor.";
+            return "⚠️ SoundCloud bağlantısı geçersiz olduğu için parça tekrar deneniyor.";
+        }
+        if (msg.contains("403") || causeMsg.contains("403")) {
+            return "❌ SoundCloud erişim engeli (403 Forbidden) verdi.";
         }
         if (msg.contains("429") || causeMsg.contains("429") || msg.contains("rate limit")) {
-            return "❌ Müzik kaynağı geçici olarak çok fazla istek aldığı için yanıt vermiyor.";
-        }
-        if (msg.contains("age") || msg.contains("restricted") || msg.contains("private") || msg.contains("region")) {
-            return "❌ Bu içerik özel, yaş kısıtlı veya bölgesel olarak engellenmiş olabilir.";
+            return "❌ SoundCloud geçici olarak çok fazla istek aldığı için yanıt vermiyor.";
         }
 
-        return "❌ Bu parça şu anda kullanılabilir kaynaklardan oynatılamıyor.";
+        return "❌ SoundCloud bu parçayı şu anda oynatamadı.";
     }
 
-    public static boolean isSoundCloud404(FriendlyException exception) {
-        if (exception == null) return false;
-        String msg = exception.getMessage() != null ? exception.getMessage() : "";
-        Throwable cause = exception.getCause();
-        String causeMsg = cause != null && cause.getMessage() != null ? cause.getMessage() : "";
-        return msg.contains("soundcloud") || causeMsg.contains("soundcloud") || msg.contains("404") || causeMsg.contains("404");
+    public static boolean isYouTubeUrlOrQuery(String query) {
+        if (query == null) return false;
+        String lower = query.toLowerCase();
+        return lower.contains("youtube.com") || lower.contains("youtu.be") || lower.startsWith("ytsearch:");
     }
 
     private PlaybackSource determineSource(String query) {
-        if (query.startsWith("ytsearch:") || query.contains("youtube.com") || query.contains("youtu.be")) {
-            return PlaybackSource.YOUTUBE;
-        } else if (query.startsWith("scsearch:") || query.contains("soundcloud.com")) {
+        if (query.startsWith("scsearch:") || query.contains("soundcloud.com")) {
             return PlaybackSource.SOUNDCLOUD;
+        } else if (query.contains("spotify.com")) {
+            return PlaybackSource.SPOTIFY;
         } else if (query.startsWith("http://") || query.startsWith("https://")) {
             return PlaybackSource.HTTP;
         }
-        return PlaybackSource.YOUTUBE;
-    }
-
-    private PlaybackSource determineSourceFromUri(String uri) {
-        if (uri == null) return PlaybackSource.YOUTUBE;
-        if (uri.contains("soundcloud.com")) return PlaybackSource.SOUNDCLOUD;
-        if (uri.contains("youtube.com") || uri.contains("youtu.be")) return PlaybackSource.YOUTUBE;
-        return PlaybackSource.OTHER;
+        return PlaybackSource.SOUNDCLOUD;
     }
 
     private void sendSearchPanel(InteractionHook hook, GuildMessageChannel messageChannel, String query, List<AudioTrack> tracks, long userId, long guildId, long channelId) {
@@ -363,8 +350,8 @@ public class MusicPlaybackService {
         SearchPanelCache.put(customId, userId, guildId, channelId, tracks);
 
         EmbedBuilder eb = new EmbedBuilder()
-                .setTitle("🔎 Arama Sonuçları Paneli")
-                .setDescription("💡 **\"" + query + "\"** için bulunan parçalar:\n\nAşağıdaki açılır menüden çalmak istediğin şarkıyı seç:")
+                .setTitle("🔎 SoundCloud Arama Sonuçları Paneli")
+                .setDescription("💡 **\"" + query + "\"** için SoundCloud üzerinde bulunan parçalar:\n\nAşağıdaki açılır menüden çalmak istediğin şarkıyı seç:")
                 .setColor(BOT_COLOR);
 
         StringSelectMenu.Builder menuBuilder = StringSelectMenu.create(customId)

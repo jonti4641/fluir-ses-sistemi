@@ -1,6 +1,9 @@
 package com.fluir.bot.commands;
 
 import com.fluir.bot.audio.*;
+import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
+import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
@@ -28,6 +31,7 @@ import java.util.Queue;
 /**
  * Slash komutlar, prefix komutlar ve dropdown seçim etkileşimlerini yöneten listener.
  * Hem metin kanallarını hem de ses kanalı yerleşik yazı sohbetlerini (GuildMessageChannel) destekler.
+ * Birincil müzik kaynağı SoundCloud olarak yapılandırılmıştır.
  */
 public class CommandManager extends ListenerAdapter {
 
@@ -43,8 +47,8 @@ public class CommandManager extends ListenerAdapter {
 
     public static void registerSlashCommands(JDA jda) {
         List<SlashCommandData> commands = new ArrayList<>();
-        commands.add(Commands.slash("çal", "Spotify, SoundCloud veya YouTube'dan müzik çalar")
-                .addOption(OptionType.STRING, "sorgu", "Şarkı adı veya Spotify / SoundCloud / YouTube URL'si", true));
+        commands.add(Commands.slash("çal", "SoundCloud veya Spotify metadata ile müzik çalar")
+                .addOption(OptionType.STRING, "sorgu", "Şarkı adı veya SoundCloud / Spotify URL'si", true));
         commands.add(Commands.slash("dur", "Çalmayı duraklatır veya devam ettirir"));
         commands.add(Commands.slash("atla", "Mevcut parçayı atlar"));
         commands.add(Commands.slash("durdur", "Çalmayı durdurur ve botu çıkarır"));
@@ -132,13 +136,13 @@ public class CommandManager extends ListenerAdapter {
             }
 
             int index = Integer.parseInt(selectedValue);
-            List<AudioTrack> tracks = cacheResult.tracks();
-            if (index < 0 || index >= tracks.size()) {
+            List<SearchPanelCache.SoundCloudTrackMetadata> metaList = cacheResult.metadataList();
+            if (index < 0 || index >= metaList.size()) {
                 event.reply("❌ Geçersiz seçim.").setEphemeral(true).queue();
                 return;
             }
 
-            AudioTrack chosenTrack = tracks.get(index);
+            SearchPanelCache.SoundCloudTrackMetadata chosenMeta = metaList.get(index);
             GuildAudioSession session = audioPlayerManager.getOrCreateSession(guild);
 
             GuildAudioSession.ConnectionResult connResult = session.ensureConnected(guild, userChannel, messageChannel);
@@ -147,16 +151,46 @@ public class CommandManager extends ListenerAdapter {
                 return;
             }
 
-            session.getScheduler().queue(chosenTrack);
+            event.deferEdit().queue();
 
-            EmbedBuilder eb = new EmbedBuilder()
-                    .setTitle("🎵 Parça Seçildi & Kuyruğa Eklendi")
-                    .setDescription("**" + chosenTrack.getInfo().title + "**")
-                    .addField("Sanatçı / Kanal", chosenTrack.getInfo().author, true)
-                    .addField("Süre", TrackScheduler.formatDuration(chosenTrack.getDuration()), true)
-                    .setColor(BOT_COLOR);
+            // Panelden seçilen kalıcı SoundCloud URI'sini oynatma anında re-resolve ederek taze AudioTrack nesnesi yüklüyoruz
+            audioPlayerManager.getPlayerManager().loadItemOrdered(session, chosenMeta.uri(), new AudioLoadResultHandler() {
+                @Override
+                public void trackLoaded(AudioTrack freshTrack) {
+                    TrackContext context = TrackContext.create(chosenMeta.title(), freshTrack.getInfo().title, freshTrack.getInfo().author, freshTrack.getInfo().uri, PlaybackSource.SOUNDCLOUD, userId, messageChannel != null ? messageChannel.getIdLong() : 0L);
+                    freshTrack.setUserData(context);
 
-            event.editMessageEmbeds(eb.build()).setComponents().queue();
+                    session.getScheduler().queue(freshTrack);
+
+                    EmbedBuilder eb = new EmbedBuilder()
+                            .setTitle("🎵 Parça Seçildi & Kuyruğa Eklendi")
+                            .setDescription("**" + freshTrack.getInfo().title + "**")
+                            .addField("Sanatçı", freshTrack.getInfo().author, true)
+                            .addField("Süre", TrackScheduler.formatDuration(freshTrack.getDuration()), true)
+                            .setColor(BOT_COLOR);
+
+                    event.getHook().editOriginalEmbeds(eb.build()).setComponents().queue();
+                }
+
+                @Override
+                public void playlistLoaded(AudioPlaylist playlist) {
+                    if (!playlist.getTracks().isEmpty()) {
+                        trackLoaded(playlist.getTracks().get(0));
+                    } else {
+                        noMatches();
+                    }
+                }
+
+                @Override
+                public void noMatches() {
+                    event.getHook().editOriginal("❌ Seçilen SoundCloud parçası yüklenemedi.").setComponents().setEmbeds().queue();
+                }
+
+                @Override
+                public void loadFailed(FriendlyException exception) {
+                    event.getHook().editOriginal(MusicPlaybackService.getFriendlyErrorMessage(exception)).setComponents().setEmbeds().queue();
+                }
+            });
 
         } catch (Exception e) {
             logger.error("Panel seçim hatası: {}", e.getMessage(), e);
@@ -186,7 +220,7 @@ public class CommandManager extends ListenerAdapter {
         try {
             switch (cmd) {
                 case "çal", "cal", "play", "p" -> {
-                    if (args.isEmpty()) { messageChannel.sendMessage("❌ Kullanım: `!çal <şarkı adı veya URL>`").queue(); return; }
+                    if (args.isEmpty()) { messageChannel.sendMessage("❌ Kullanım: `!çal <şarkı adı veya SoundCloud URL>`").queue(); return; }
                     AudioChannel vc = getUserAudioChannel(member, messageChannel);
                     if (vc == null) return;
                     audioPlayerManager.getPlaybackService().processPlayRequest(guild, vc, messageChannel, null, args, false);
@@ -440,14 +474,14 @@ public class CommandManager extends ListenerAdapter {
                 .setTitle("🎵 Fluir Ses Sistemi — Komutlar")
                 .setDescription("Slash komutları (`/`) veya prefix (`!`) kullanabilirsin.")
                 .addField("🎵 Çalma & Arama",
-                        "`/çal <sorgu>` • Arama paneli açar, Spotify/SoundCloud/YouTube destekler\n`/dur` • Duraklat/Devam\n`/atla` • Sonraki parça\n`/durdur` • Çıkış yap", false)
+                        "`/çal <sorgu>` • SoundCloud arama paneli açar (SoundCloud & Spotify metadata)\n`/dur` • Duraklat/Devam\n`/atla` • Sonraki parça\n`/durdur` • Çıkış yap", false)
                 .addField("📋 Panel & Kuyruk",
                         "`/kuyruk` • Sıradakileri gör\n`/karistir` • Karıştır\n`/temizle` • Temizle", false)
                 .addField("⚙️ Ayarlar",
                         "`/ses <0-150>` • Ses ayarla\n`/döngü` • Döngü\n`/simdi` • Şu an çalan", false)
-                .addField("🛡️ Filtreler & Güvenlik",
-                        "Film, dizi, fragman ve teaser videoları otomatik engellenir.", false)
+                .addField("⚠️ Kaynak Notu",
+                        "YouTube bağlantıları desteklenmez. Spotify bağlantıları metadata olarak çözümlenip SoundCloud'da aratılır.", false)
                 .setColor(BOT_COLOR)
-                .setFooter("Fluir Ses Sistemi | JDA 5.2.1 + LavaPlayer");
+                .setFooter("Fluir Ses Sistemi | JDA 5.2.1 + LavaPlayer (SoundCloud)");
     }
 }

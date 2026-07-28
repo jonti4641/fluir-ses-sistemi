@@ -4,6 +4,7 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Arama sonuç panellerini (Select Menu) saklayan, TTL ve yetki kontrollü bellek yöneticisi.
+ * Geçici stream URL'leri tutan AudioTrack nesnelerini saklamaz; yalnızca kalıcı SoundCloud metadata (URI, Başlık, Sanatçı) tutar.
  */
 public class SearchPanelCache {
 
@@ -24,15 +26,34 @@ public class SearchPanelCache {
     private static final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
     static {
-        // Her 1 dakikada bir süresi dolmuş panelleri temizler
         cleanupExecutor.scheduleAtFixedRate(SearchPanelCache::evictExpired, 1, 1, TimeUnit.MINUTES);
+    }
+
+    public record SoundCloudTrackMetadata(
+            String title,
+            String author,
+            String uri,
+            long durationMs
+    ) {
+        public static SoundCloudTrackMetadata fromTrack(AudioTrack track) {
+            return new SoundCloudTrackMetadata(
+                    track.getInfo().title,
+                    track.getInfo().author,
+                    track.getInfo().uri,
+                    track.getDuration()
+            );
+        }
     }
 
     public static void put(String customId, long userId, long guildId, long channelId, List<AudioTrack> tracks) {
         if (cache.size() >= MAX_CAPACITY) {
             evictExpired();
         }
-        cache.put(customId, new SearchPanelEntry(userId, guildId, channelId, tracks, System.currentTimeMillis()));
+        List<SoundCloudTrackMetadata> metaList = new ArrayList<>();
+        for (AudioTrack t : tracks) {
+            metaList.add(SoundCloudTrackMetadata.fromTrack(t));
+        }
+        cache.put(customId, new SearchPanelEntry(userId, guildId, channelId, metaList, System.currentTimeMillis()));
         logger.debug("🔎 Panel cache eklendi [ID: {}, User: {}]", customId, userId);
     }
 
@@ -52,7 +73,7 @@ public class SearchPanelCache {
         }
 
         cache.remove(customId); // Tek kullanımlık
-        return new SearchPanelResult(entry.tracks, SearchPanelStatus.SUCCESS);
+        return new SearchPanelResult(entry.metadataList, SearchPanelStatus.SUCCESS);
     }
 
     public static void evictExpired() {
@@ -69,9 +90,9 @@ public class SearchPanelCache {
         cache.clear();
     }
 
-    public record SearchPanelEntry(long userId, long guildId, long channelId, List<AudioTrack> tracks, long createdAt) {}
+    public record SearchPanelEntry(long userId, long guildId, long channelId, List<SoundCloudTrackMetadata> metadataList, long createdAt) {}
 
-    public record SearchPanelResult(List<AudioTrack> tracks, SearchPanelStatus status) {}
+    public record SearchPanelResult(List<SoundCloudTrackMetadata> metadataList, SearchPanelStatus status) {}
 
     public enum SearchPanelStatus {
         SUCCESS,

@@ -1,18 +1,19 @@
 # 🎵 Fluir Ses Sistemi
 
-> **Güçlü Discord ses botu** — JDA (Java Discord API) + LavaPlayer ile geliştirilmiştir.
+> **Güçlü Discord ses botu** — JDA 5.2.1 + LavaPlayer (SoundCloud) ile geliştirilmiştir.
 
 ---
 
 ## ✨ Özellikler
 
-- 🎵 **YouTube, SoundCloud, Twitch, Vimeo, Bandcamp** desteği
+- 🎵 **SoundCloud, Twitch, Vimeo, Bandcamp** desteği
+- 🟢 **Spotify metadata desteği** (Spotify bağlantıları otomatik olarak şarkı adı/sanatçı bilgisine dönüştürülüp SoundCloud üzerinden aratılır)
 - 📋 **Çalma kuyruğu** — istediğin kadar parça ekle
 - 🔁 **Döngü modu** — parçayı tekrar tekrar çal
 - 🔀 **Kuyruk karıştırma**
 - 🔊 **Ses seviyesi ayarı** (0–150%)
 - ⏸️ **Duraklatma / Devam**
-- 🔍 **Arama desteği** — URL vermene gerek yok
+- 🔍 **Arama paneli desteği** — `scsearch:` ile SoundCloud üzerinden arama
 - 📝 **Hem Slash (`/`) hem Prefix (`!`) komutlar**
 
 ---
@@ -21,7 +22,7 @@
 
 | Komut | Açıklama |
 |-------|----------|
-| `/çal <URL/arama>` | Parça veya çalma listesi çalar |
+| `/çal <URL/arama>` | SoundCloud parçası veya Spotify metadata araması çalar |
 | `/dur` | Duraklatma/Devam |
 | `/atla` | Sonraki parçaya geç |
 | `/durdur` | Durdur ve ses kanalından çık |
@@ -52,7 +53,7 @@
 
 ```bash
 # Projeyi klonla
-git clone https://github.com/KULLANICI_ADI/fluir-ses-sistemi.git
+git clone https://github.com/jonti4641/fluir-ses-sistemi.git
 cd fluir-ses-sistemi
 
 # .env dosyası oluştur
@@ -80,9 +81,10 @@ fluir-ses-sistemi/
 ├── src/main/java/com/fluir/bot/
 │   ├── FluirBot.java              # Ana giriş noktası
 │   ├── audio/
-│   │   ├── AudioPlayerManager.java  # LavaPlayer yöneticisi
+│   │   ├── AudioPlayerManager.java  # LavaPlayer SoundCloud yöneticisi
 │   │   ├── GuildAudioManager.java   # Sunucu bazlı ses yöneticisi
 │   │   ├── TrackScheduler.java      # Kuyruk ve döngü yönetimi
+│   │   ├── MusicPlaybackService.java# Müzik arama ve kurtarma servisi
 │   │   └── AudioPlayerSendHandler.java # JDA ses köprüsü
 │   └── commands/
 │       └── CommandManager.java      # Slash + Prefix komutlar
@@ -98,8 +100,8 @@ fluir-ses-sistemi/
 ## 🛠️ Teknolojiler
 
 - **Java 17**
-- **JDA 5.x** — Java Discord API
-- **LavaPlayer 2.x** — Ses motoru
+- **JDA 5.2.1** — Java Discord API
+- **LavaPlayer 2.2.2** — Ses motoru (SoundCloud)
 - **Maven** — Bağımlılık yönetimi
 - **Docker** — Railway deployment
 - **Logback** — Loglama
@@ -110,8 +112,9 @@ fluir-ses-sistemi/
 
 - `.env` dosyasını **asla** GitHub'a yükleme! (`.gitignore`'a ekli)
 - Railway'de token'ı **Variables** kısmından ayarla
-- YouTube'un bazı kısıtlamaları nedeniyle zaman zaman `ytsearch:` ön eki gerekebilir
+- **YouTube bağlantıları desteklenmez.** YouTube bağlantıları bot tarafından reddedilir.
+- **Spotify Desteği:** Spotify bağlantıları yalnızca metadata (sanatçı + parça adı) çözümlemesidir; ses SoundCloud (`scsearch:`) üzerinden iletilir.
 
 ---
 
-*Fluir Ses Sistemi — JDA + LavaPlayer*
+*Fluir Ses Sistemi — JDA 5.2.1 + LavaPlayer (SoundCloud)*
