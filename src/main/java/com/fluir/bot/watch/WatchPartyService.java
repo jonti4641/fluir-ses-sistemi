@@ -256,7 +256,8 @@ public final class WatchPartyService {
         int status = response.statusCode();
         if (!(status == 200 || status == 206 || status == 204 || status == 304 || status == 416)) {
             response.body().close();
-            sendJson(exchange, 502, "{\"error\":\"video_relay_upstream_rejected\"}");
+            sendJson(exchange, status >= 400 && status < 500 ? status : 502,
+                    "{\"error\":\"video_relay_upstream_rejected\"}");
             return;
         }
         for (String name : new String[]{"Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"}) {
