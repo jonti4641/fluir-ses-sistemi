@@ -110,10 +110,15 @@ public final class WatchPartyService {
             sendJson(exchange, 400, "{\"error\":\"invalid_youtube_source\"}");
             return;
         }
+        String activityOrigin = SNOWFLAKE.matcher(applicationId).matches()
+                ? "https://" + applicationId + ".discordsays.com"
+                : publicBaseUrl;
         HttpRequest request = HttpRequest.newBuilder(target)
                 .timeout(Duration.ofSeconds(12))
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.7")
+                .header("Origin", activityOrigin)
+                .header("Referer", activityOrigin + "/")
                 .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0")
                 .GET().build();
         try {
