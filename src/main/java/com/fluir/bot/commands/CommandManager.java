@@ -75,7 +75,7 @@ public class CommandManager extends ListenerAdapter {
         commands.add(Commands.slash("durum", "Bot, veritabanı ve SoundCloud durumunu gösterir"));
         commands.add(Commands.slash("gecmis", "Son çalınan parçaları gösterir"));
         commands.add(Commands.slash("kuyruk-yukle", "Kaydedilmiş kuyruğu geri yükler"));
-        commands.add(Commands.slash("izle", "YouTube için senkron ortak izleme odası açar")
+        commands.add(Commands.slash("izle", "Discord Watch Together ile YouTube izleme odası açar")
                 .addOption(OptionType.STRING, "youtube", "YouTube video bağlantısı", true));
         commands.add(Commands.slash("favori", "Kişisel favorileri yönetir")
                 .addSubcommands(new SubcommandData("ekle","Çalan parçayı favorilere ekler"),new SubcommandData("liste","Favorileri gösterir"),new SubcommandData("sil","Sıra numarasıyla siler").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true),new SubcommandData("cal","Favoriyi çalar").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true)));
@@ -85,14 +85,7 @@ public class CommandManager extends ListenerAdapter {
                 .addSubcommands(new SubcommandData("goster","Ayarları gösterir"),new SubcommandData("ses","Varsayılan ses").addOption(OptionType.INTEGER,"deger","0-150",true),new SubcommandData("bos-kalma","Ayrılma süresi").addOption(OptionType.INTEGER,"saniye","30-900",true),new SubcommandData("max-kuyruk","Kuyruk sınırı").addOption(OptionType.INTEGER,"deger","10-500",true),new SubcommandData("otomatik-cal","Otomatik çalma").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("duyurular","Çalıyor duyuruları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("prefix","Prefix komutları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("dj-rol","DJ rolü").addOption(OptionType.ROLE,"rol","Kontrol yetkili rol",true),new SubcommandData("dj-rol-sil","DJ rolü sınırlamasını kaldırır"),new SubcommandData("komut-kanal","Komut kanalı").addOption(OptionType.CHANNEL,"kanal","İzin verilen kanal",true),new SubcommandData("komut-kanal-sil","Komut kanalı sınırlamasını kaldırır")));
 
         jda.updateCommands().addCommands(commands).queue(
-                ok -> {
-                    logger.info("✅ {} slash komutu kaydedildi.", commands.size());
-                    new ActivityLaunchService().ensureEntryPoint(jda.getSelfUser().getId(), botToken)
-                            .thenAccept(success -> {
-                                if (success) logger.info("✅ Watch Together Etkinlikler rafı giriş noktası kaydedildi.");
-                                else logger.warn("⚠️ Watch Together Etkinlikler rafı giriş noktası kaydedilemedi.");
-                            });
-                },
+                ok -> logger.info("✅ {} slash komutu kaydedildi.", commands.size()),
                 err -> logger.error("❌ Slash komutları kaydedilemedi: {}", err.getMessage())
         );
     }
@@ -502,12 +495,6 @@ public class CommandManager extends ListenerAdapter {
     }
 
     private void handleWatchParty(SlashCommandInteractionEvent event) {
-        WatchPartyService service = audioPlayerManager.getWatchPartyService();
-        if (!service.isActivityAvailable()) {
-            event.reply("❌ Discord Activity henüz hazır değil. Railway Public Domain ve Activity ayarları kontrol edilmeli.")
-                    .setEphemeral(true).queue();
-            return;
-        }
         Member member = event.getMember();
         AudioChannel voiceChannel = getUserAudioChannel(member, null);
         if (voiceChannel == null) {
@@ -524,27 +511,28 @@ public class CommandManager extends ListenerAdapter {
             return;
         }
         String youtubeUrl = event.getOption("youtube").getAsString();
-        try {
-            WatchPartyService.PendingLaunch pending = service.prepareActivity(
-                    event.getChannelIdLong(), youtubeUrl, event.getUser().getIdLong());
-            activityLauncher.launch(event.getIdLong(), event.getToken()).thenAccept(success -> {
-                if (success) {
-                    logger.info("Discord Activity başlatıldı [Guild: {}, Channel: {}, Video: {}]",
-                            event.getGuild().getIdLong(), event.getChannelIdLong(), pending.videoId());
-                    return;
-                }
-                service.cancelPrepared(pending);
-                if (!event.isAcknowledged()) {
-                    event.reply("❌ Activity başlatılamadı. Discord Developer Portal'da Activities etkin olmalı.")
-                            .setEphemeral(true).queue(null,
-                                    error -> logger.warn("Activity hata yanıtı gönderilemedi: {}", error.getMessage()));
-                }
-            });
-        } catch (IllegalArgumentException e) {
+        String videoId = WatchPartyService.extractYouTubeId(youtubeUrl);
+        if (videoId == null) {
             event.reply("❌ Geçerli bir YouTube video bağlantısı gir.").setEphemeral(true).queue();
-        } catch (IllegalStateException e) {
-            event.reply("❌ Şu anda yeni izleme odası oluşturulamıyor.").setEphemeral(true).queue();
+            return;
         }
+        if (!event.getGuild().getSelfMember().hasPermission(voiceChannel, Permission.CREATE_INSTANT_INVITE)) {
+            event.reply("❌ Botun bu ses kanalında **Davet Oluştur** izni yok.").setEphemeral(true).queue();
+            return;
+        }
+        event.deferReply().queue(ignored -> activityLauncher.createOfficialWatchTogetherInvite(
+                        voiceChannel.getIdLong(), audioPlayerManager.getConfig().discordToken())
+                .thenAccept(invite -> {
+                    if (invite.isEmpty()) {
+                        event.getHook().editOriginal("❌ Discord Watch Together daveti oluşturulamadı. Bot izinlerini kontrol et.").queue();
+                        return;
+                    }
+                    String selectedVideo = "https://www.youtube.com/watch?v=" + videoId;
+                    event.getHook().editOriginal("🎬 **Discord Watch Together hazır!**\n"
+                            + invite.get() + "\n\n📺 Etkinlik açılınca bu videoyu ekle:\n<" + selectedVideo + ">").queue();
+                    logger.info("Resmi Watch Together daveti oluşturuldu [Guild: {}, Channel: {}, Video: {}]",
+                            event.getGuild().getIdLong(), voiceChannel.getIdLong(), videoId);
+                }), error -> logger.warn("İzle komutu ertelenemedi: {}", error.getMessage()));
     }
 
     private void handleStatusSlash(SlashCommandInteractionEvent event){
@@ -664,4 +652,3 @@ public class CommandManager extends ListenerAdapter {
                 .setFooter("Fluir Ses Sistemi | JDA 6.5 + DAVE + LavaPlayer 2.2.7");
     }
 }
-

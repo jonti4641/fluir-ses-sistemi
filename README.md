@@ -86,22 +86,18 @@ Ortak izleme için serviste **Public Networking** alan adı oluştur. Railway bu
 `RAILWAY_PUBLIC_DOMAIN` olarak otomatik sağlar; istenirse `PUBLIC_BASE_URL` değişkeniyle
 başka bir HTTPS alan adı kullanılabilir.
 
-### Discord Activity kurulumu
+### Discord Watch Together kurulumu
 
-1. Discord Developer Portal'da bot uygulamasını açıp **Activities → Settings → Enable Activities** seçeneğini etkinleştir.
-2. Railway Public Networking ile oluşan alan adını kopyala (ör. `fluir-production.up.railway.app`).
-3. **Activities → URL Mappings** altında iki eşleme ekle:
-   - `/youtube` → `www.youtube.com`
-   - `/` → Railway alan adı (yalnızca alan adı; `https://` ekleme)
-4. Desktop ve Mobile destek platformlarını etkinleştir. Test hesabında Discord Developer Mode açık olmalı.
-5. Bot başlangıçta `watch together` birincil giriş komutunu oluşturur; Activity ses kanalındaki **Etkinlikler** rafından doğrudan açılabilir.
-6. Raf içinden açıldığında oda sahibi ekrandaki alana YouTube bağlantısını girer. Alternatif olarak ses kanalının yazılı sohbetinde `/izle youtube:<bağlantı>` çalıştırılabilir.
+`/izle youtube:<bağlantı>` komutu Discord'un doğrulanmış resmi **Watch Together**
+etkinliği için bir Embedded Application daveti oluşturur. Özel URL Mapping veya
+YouTube medya proxy'si gerekmez.
+
+Botun ses kanalında **Davet Oluştur**, kullanıcının ise **Etkinlikleri Kullan** izni
+olmalıdır. Komutun gönderdiği Watch Together davetini açıp mesajdaki doğrulanmış
+YouTube bağlantısını resmi etkinliğe ekle.
 
 Activity oturumu backend tarafından Discord'un Activity Instance API'siyle doğrulanır. Oda isteği
 iki dakika içinde Activity tarafından alınmazsa iptal edilir; oda ve kontrol istekleri oran sınırlıdır.
-Video CDN istekleri ayrı bir portal eşlemesi gerektirmez. Fluir yalnızca YouTube'un imzalı
-`googlevideo.com` medya yollarını, alan adı ve yol doğrulamasıyla Railway üzerinden aktarır;
-keyfi URL proxy'lenmez.
 Oynatma kontrolleri yalnızca odayı ilk açan tarayıcıya verilen `Secure`, `HttpOnly`, bölümlenmiş
 yetki çereziyle çalışır. Uygulama kamera, mikrofon, konum, ekran yakalama veya pano izni istemez ve
 oran sınırlama için istemci IP adresini okumaz.
