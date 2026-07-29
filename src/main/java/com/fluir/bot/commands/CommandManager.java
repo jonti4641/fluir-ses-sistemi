@@ -482,6 +482,6 @@ public class CommandManager extends ListenerAdapter {
                 .addField("⚠️ Kaynak Notu",
                         "YouTube bağlantıları desteklenmez. Spotify bağlantıları metadata olarak çözümlenip SoundCloud'da aratılır.", false)
                 .setColor(BOT_COLOR)
-                .setFooter("Fluir Ses Sistemi | JDA 5.2.1 + LavaPlayer (SoundCloud)");
+                .setFooter("Fluir Ses Sistemi | JDA 6.5 + DAVE + LavaPlayer 2.2.7");
     }
 }
