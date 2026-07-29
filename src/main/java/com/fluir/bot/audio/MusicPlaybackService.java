@@ -5,11 +5,12 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
+import net.dv8tion.jda.api.components.selections.StringSelectMenu;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.interactions.InteractionHook;
-import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -370,9 +371,9 @@ public class MusicPlaybackService {
         menuBuilder.addOption("❌ İptal Et", "cancel", "Aramayı kapatır");
 
         if (hook != null) {
-            hook.sendMessageEmbeds(eb.build()).addActionRow(menuBuilder.build()).queue();
+            hook.sendMessageEmbeds(eb.build()).addComponents(ActionRow.of(menuBuilder.build())).queue();
         } else if (messageChannel != null) {
-            messageChannel.sendMessageEmbeds(eb.build()).setActionRow(menuBuilder.build()).queue();
+            messageChannel.sendMessageEmbeds(eb.build()).setComponents(ActionRow.of(menuBuilder.build())).queue();
         }
     }
 
