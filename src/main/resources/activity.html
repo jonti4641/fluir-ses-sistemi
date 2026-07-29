@@ -52,11 +52,20 @@
       await Promise.race([discordSdk.ready(),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Discord zaman aşımı")),8000))]);
       const instanceId=discordSdk.instanceId,channelId=discordSdk.channelId;
       if(!instanceId||!channelId)throw new Error("Activity bağlamı bulunamadı");
-      const response=await fetch("/api/activity/bootstrap",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"instanceId="+encodeURIComponent(instanceId)+"&channelId="+encodeURIComponent(channelId)});
-      const data=await response.json();
-      if(!response.ok){if(response.status===409)throw new Error("Bu kanalda bekleyen /izle isteği yok");throw new Error("Oturum doğrulanamadı ("+response.status+")")}
+      const data=await bootstrapActivity(instanceId,channelId);
       roomId=data.roomId;videoId=data.videoId;byId("room").textContent=roomId.slice(0,8);connectEvents();maybeCreatePlayer();
     }catch(error){fail("Activity başlatılamadı",error.message||"Bilinmeyen hata")}
+  }
+  async function bootstrapActivity(instanceId,channelId){
+    for(let attempt=1;attempt<=6;attempt++){
+      const response=await fetch("/api/activity/bootstrap",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"instanceId="+encodeURIComponent(instanceId)+"&channelId="+encodeURIComponent(channelId)});
+      const data=await response.json();
+      if(response.ok)return data;
+      if(response.status===409)throw new Error("Bu kanalda bekleyen /izle isteği yok");
+      if(response.status!==403||attempt===6)throw new Error("Oturum doğrulanamadı ("+response.status+")");
+      byId("loadingDetail").textContent="Discord video oturumu hazırlanıyor… ("+attempt+"/6)";
+      await new Promise(resolve=>setTimeout(resolve,700));
+    }
   }
   function maybeCreatePlayer(){
     if(!videoId||playerFrame)return;
@@ -65,12 +74,20 @@
     playerFrame.title="YouTube video oynatıcı";
     playerFrame.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";
     playerFrame.allowFullscreen=true;
-    playerFrame.src="/youtube/embed/"+encodeURIComponent(videoId)+"?enablejsapi=1&playsinline=1&rel=0&controls=0&origin="+encodeURIComponent(location.origin);
-    playerFrame.onload=()=>{announceListener();setTimeout(announceListener,350);setTimeout(announceListener,1000)};
+    playerFrame.loading="eager";
+    playerFrame.referrerPolicy="strict-origin-when-cross-origin";
+    playerFrame.src="/youtube/embed/"+encodeURIComponent(videoId)+"?enablejsapi=1&autoplay=1&playsinline=1&rel=0&controls=1&fs=1&origin="+encodeURIComponent(location.origin);
+    playerFrame.onload=()=>{
+      playerReady=true;
+      byId("loading").classList.add("hidden");
+      byId("videoTitle").textContent="YouTube videosu";
+      announceListener();setTimeout(announceListener,350);setTimeout(announceListener,1000);setTimeout(announceListener,2200);
+      fetchState();
+    };
     byId("player").appendChild(playerFrame);
   }
-  function playerCommand(func,args=[]){if(playerFrame?.contentWindow)playerFrame.contentWindow.postMessage(JSON.stringify({event:"command",func,args,id:"youtube-player"}),location.origin)}
-  function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),location.origin);playerCommand("addEventListener",["onReady"]);playerCommand("addEventListener",["onStateChange"]);playerCommand("addEventListener",["onError"])}
+  function playerCommand(func,args=[]){if(playerFrame?.contentWindow)playerFrame.contentWindow.postMessage(JSON.stringify({event:"command",func,args,id:"youtube-player"}),"*")}
+  function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),"*");playerCommand("addEventListener",["onReady"]);playerCommand("addEventListener",["onStateChange"]);playerCommand("addEventListener",["onError"])}
   window.addEventListener("message",event=>{
     if(!playerFrame||event.source!==playerFrame.contentWindow)return;
     let message;try{message=typeof event.data==="string"?JSON.parse(event.data):event.data}catch{return}
