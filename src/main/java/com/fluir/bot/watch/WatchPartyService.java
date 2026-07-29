@@ -501,7 +501,7 @@ public final class WatchPartyService {
         private final long ownerUserId;
         private final long expiresAt = System.currentTimeMillis() + ROOM_TTL.toMillis();
         private final CopyOnWriteArrayList<ArrayBlockingQueue<String>> subscribers = new CopyOnWriteArrayList<>();
-        private boolean playing;
+        private boolean playing = true;
         private double position;
         private long stateChangedAt = System.currentTimeMillis();
         private long version;
@@ -550,3 +550,4 @@ public final class WatchPartyService {
         }
     }
 }
+
