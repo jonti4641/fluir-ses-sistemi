@@ -14,9 +14,9 @@ class ActivityLaunchServiceTest {
         String normalized = WatchPartyService.normalizeYouTubeEmbedHtml(html);
 
         assertFalse(normalized.contains("nonce=\"old\""));
-        assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-3"));
+        assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-4"));
         assertTrue(normalized.contains("location.origin+\"/googlevideo/\"+subdomain"));
-        assertTrue(normalized.contains("window.fetch=(input,init)"));
+        assertTrue(normalized.contains("window.fetch=async(input,init)"));
         assertFalse(normalized.contains("target:\"{subdomain}.googlevideo.com\""));
         assertTrue(normalized.contains("patchUrlMappings"));
         assertFalse(normalized.contains("http://"));
@@ -26,6 +26,8 @@ class ActivityLaunchServiceTest {
     void googleVideoRelayAcceptsOnlySignedFixedMediaTargets() {
         assertNotNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
                 "/googlevideo/rr1---sn-example/videoplayback?expire=123&id=o-test&sig=abc")));
+        assertNotNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/rr1---sn-example/videoplayback?expire=123&id=o-test&n=abc")));
         assertNotNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
                 "/googlevideo/test/generate_204")));
 

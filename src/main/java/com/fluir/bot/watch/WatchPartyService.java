@@ -67,13 +67,17 @@ public final class WatchPartyService {
                   return location.origin+"/googlevideo/"+subdomain+url.pathname+url.search+url.hash;
                 }catch{return value}
               };
+              const markRelay=(url,status)=>{if(String(url).startsWith(location.origin+"/googlevideo/"))document.documentElement.dataset.fluirRelayStatus=String(status)};
               const mappedFetch=window.fetch.bind(window);
-              window.fetch=(input,init)=>{
-                if(input instanceof Request)return mappedFetch(new Request(remap(input.url),input),init);
-                return mappedFetch(remap(input),init);
+              window.fetch=async(input,init)=>{
+                const mapped=input instanceof Request?new Request(remap(input.url),input):remap(input);
+                const response=await mappedFetch(mapped,init);markRelay(mapped instanceof Request?mapped.url:mapped,response.status);return response;
               };
               const mappedXhrOpen=XMLHttpRequest.prototype.open;
-              XMLHttpRequest.prototype.open=function(method,url,...rest){return mappedXhrOpen.call(this,method,remap(url),...rest)};
+              XMLHttpRequest.prototype.open=function(method,url,...rest){
+                const mapped=remap(url);if(String(mapped).startsWith(location.origin+"/googlevideo/"))this.addEventListener("loadend",()=>markRelay(mapped,this.status),{once:true});
+                return mappedXhrOpen.call(this,method,mapped,...rest)
+              };
               const patchSrc=prototype=>{
                 const descriptor=Object.getOwnPropertyDescriptor(prototype,"src");
                 if(!descriptor?.get||!descriptor?.set)return;
@@ -216,8 +220,7 @@ public final class WatchPartyService {
     private static boolean looksLikeSignedVideoQuery(String query) {
         if (query == null) return false;
         String framed = "&" + query.toLowerCase() + "&";
-        return framed.contains("&expire=") && framed.contains("&id=")
-                && (framed.contains("&sig=") || framed.contains("&signature=") || framed.contains("&lsig="));
+        return framed.contains("&expire=") && framed.contains("&id=");
     }
 
     private static URI safeGoogleVideoRedirect(URI current, String location) {
@@ -413,7 +416,7 @@ public final class WatchPartyService {
 
     static String normalizeYouTubeEmbedHtml(String html) {
         String normalized = HTML_NONCE_ATTRIBUTE.matcher(html == null ? "" : html).replaceAll("");
-        normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=proxy-route-3$3");
+        normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=proxy-route-4$3");
         int head = normalized.toLowerCase().indexOf("<head>");
         if (head >= 0) normalized = normalized.substring(0, head + 6) + YOUTUBE_PROXY_BOOTSTRAP + normalized.substring(head + 6);
         return normalized;
