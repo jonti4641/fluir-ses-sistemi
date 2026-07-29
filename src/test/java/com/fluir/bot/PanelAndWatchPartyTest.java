@@ -4,6 +4,9 @@ import com.fluir.bot.audio.NowPlayingPanel;
 import com.fluir.bot.watch.WatchPartyService;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class PanelAndWatchPartyTest {
@@ -50,4 +53,17 @@ class PanelAndWatchPartyTest {
         assertTrue(pending.expiresAt() > System.currentTimeMillis());
         service.cancelPrepared(pending);
     }
+
+    @Test
+    void discordActivityLoadsTheVideoDirectlyWithNativeControls() throws IOException {
+        try (var input = getClass().getResourceAsStream("/activity.html")) {
+            assertNotNull(input);
+            String activity = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(activity.contains("autoplay=1"));
+            assertTrue(activity.contains("controls=1"));
+            assertTrue(activity.contains("playerFrame.onload"));
+            assertTrue(activity.contains("classList.add(\"hidden\")"));
+        }
+    }
 }
+
