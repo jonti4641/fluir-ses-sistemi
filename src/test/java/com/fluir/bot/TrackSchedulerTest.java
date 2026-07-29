@@ -110,4 +110,21 @@ class TrackSchedulerTest {
         scheduler.onTrackEnd(mockPlayer, track1, AudioTrackEndReason.REPLACED);
         verify(mockPlayer, never()).startTrack(any(), eq(false));
     }
+
+    @Test
+    @DisplayName("Fallback başladıktan sonra eski parçanın gecikmiş LOAD_FAILED olayı kuyruğu ilerletmemelidir")
+    void testStaleFailedTrackEndDoesNotReplaceFallback() {
+        when(mockPlayer.startTrack(track1, true)).thenReturn(true);
+        when(mockPlayer.startTrack(track2, true)).thenReturn(false);
+
+        scheduler.queue(track1);
+        scheduler.queue(track2);
+        scheduler.startFallbackTrack(track3);
+
+        scheduler.onTrackEnd(mockPlayer, track1, AudioTrackEndReason.LOAD_FAILED);
+
+        assertSame(track3, scheduler.getCurrentTrack());
+        assertEquals(1, scheduler.getQueue().size());
+        verify(mockPlayer, never()).startTrack(track2, false);
+    }
 }
