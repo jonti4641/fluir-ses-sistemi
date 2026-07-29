@@ -6,6 +6,12 @@
 
 ## ✨ Özellikler
 
+- 💾 **Kalıcı veriler** — sunucu ayarları, favoriler, geçmiş, çalma listeleri ve kuyruk kurtarma
+- 🎛️ **Düğmeli kontrol paneli** — yalnızca ilk gerçek ses karesinden sonra “çalıyor” duyurusu
+- 🛡️ **Ek güvenlik** — SSRF/LFI koruması, izinli HTTPS alan adları, oran ve kuyruk sınırı
+- 🩺 **Gözlemlenebilirlik** — Railway `/health`, korumalı `/metrics` ve güvenli hata webhook'u
+- ⚡ **Dayanıklılık** — sunucu bazlı devre kesici, bozuk URI kara listesi ve otomatik çalma
+
 - 🎵 **SoundCloud, Twitch, Vimeo, Bandcamp** desteği
 - 🟢 **Spotify metadata desteği** (Spotify bağlantıları otomatik olarak şarkı adı/sanatçı bilgisine dönüştürülüp SoundCloud üzerinden aratılır)
 - 📋 **Çalma kuyruğu** — istediğin kadar parça ekle
@@ -69,8 +75,10 @@ java -jar target/fluir-ses-sistemi-1.0.0.jar
 
 1. [Railway.app](https://railway.app) → **New Project**
 2. **Deploy from GitHub Repo** seç → bu repoyu bağla
-3. **Variables** → `DISCORD_TOKEN` = `your_token` ekle
-4. Deploy otomatik başlar ✅
+3. **Variables** → `DISCORD_TOKEN` = `your_token`, `DATA_DIR` = `/app/data` ekle
+4. Kalıcı veriler için Railway Volume oluşturup `/app/data` yoluna bağla
+5. İstersen `ERROR_WEBHOOK_URL` ve uzun/rastgele bir `HEALTH_METRICS_TOKEN` tanımla
+6. Deploy otomatik başlar; Railway `/health` yanıtını bekler ✅
 
 ---
 
@@ -112,6 +120,8 @@ fluir-ses-sistemi/
 
 - `.env` dosyasını **asla** GitHub'a yükleme! (`.gitignore`'a ekli)
 - Railway'de token'ı **Variables** kısmından ayarla
+- Token/webhook değerlerini loglara, komutlara veya repoya yazma; bot hata webhook'unda bunları taşımaz.
+- Genel HTTP URL ve yerel dosya oynatma güvenlik nedeniyle kapalıdır; yalnızca desteklenen HTTPS medya alan adları kabul edilir.
 - **YouTube bağlantıları desteklenmez.** YouTube bağlantıları bot tarafından reddedilir.
 - **Spotify Desteği:** Spotify bağlantıları yalnızca metadata (sanatçı + parça adı) çözümlemesidir; ses SoundCloud (`scsearch:`) üzerinden iletilir.
 

@@ -20,6 +20,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.HashSet;
+import com.fluir.bot.config.BotConfig;
+import com.fluir.bot.monitoring.SecureWebhookNotifier;
+import com.fluir.bot.persistence.PersistentStore;
+import com.fluir.bot.security.MediaInputPolicy;
 
 /**
  * Slash, Prefix ve Panel işlemlerinin tümünün kullandığı merkezi oynatma servisi.
@@ -32,15 +39,30 @@ public class MusicPlaybackService {
     public static final int MAX_PLAYLIST_TRACKS = 100;
 
     private final AudioPlayerManager audioPlayerManager;
+    private final PersistentStore store;
+    private final BotConfig config;
+    private final SecureWebhookNotifier notifier;
 
     public MusicPlaybackService(AudioPlayerManager audioPlayerManager) {
+        this(audioPlayerManager, null, BotConfig.load(), new SecureWebhookNotifier(""));
+    }
+
+    public MusicPlaybackService(AudioPlayerManager audioPlayerManager, PersistentStore store, BotConfig config, SecureWebhookNotifier notifier) {
         this.audioPlayerManager = audioPlayerManager;
+        this.store = store;
+        this.config = config;
+        this.notifier = notifier;
     }
 
     /**
      * Slash veya doğrudan yanıt ortamı için müzik arama ve oynatma.
      */
     public void processPlayRequest(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel, InteractionHook hook, String rawQuery, boolean isFallback) {
+        MediaInputPolicy.Validation validation = MediaInputPolicy.validate(rawQuery, config.maxQueryLength());
+        if (!validation.allowed()) {
+            sendResponse(hook, messageChannel, "❌ " + validation.message());
+            return;
+        }
         String processedQuery = rawQuery.trim();
 
         // 1. YouTube bağlantısı kontrolü -> Doğrudan reddedilir
@@ -67,7 +89,7 @@ public class MusicPlaybackService {
         }
 
         // SoundCloud Circuit Breaker kontrolü
-        if (SoundCloudCircuitBreaker.isOpen()) {
+        if (SoundCloudCircuitBreaker.isOpen(guild.getIdLong())) {
             logger.warn("⚡ SoundCloud circuit açık olduğu için istek reddediliyor.");
             sendResponse(hook, messageChannel, "❌ SoundCloud oynatma hizmeti geçici olarak kullanılamıyor.");
             return;
@@ -105,7 +127,10 @@ public class MusicPlaybackService {
                     return;
                 }
 
-                session.getScheduler().queue(track);
+                if (!session.getScheduler().queue(track)) {
+                    sendResponse(hook, messageChannel, "❌ Sunucu kuyruğu sınırına ulaştı.");
+                    return;
+                }
                 sendResponse(hook, messageChannel, "✅ Kuyruğa eklendi: **" + track.getInfo().title + "**\n" +
                         "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + TrackScheduler.formatDuration(track.getDuration()) + "`");
             }
@@ -135,7 +160,7 @@ public class MusicPlaybackService {
                             sendResponse(hook, messageChannel, connResult.message());
                             return;
                         }
-                        session.getScheduler().queue(singleTrack);
+                        if (!session.getScheduler().queue(singleTrack)) { sendResponse(hook,messageChannel,"❌ Sunucu kuyruğu sınırına ulaştı."); return; }
                         sendResponse(hook, messageChannel, "🎵 Çalınıyor: **" + singleTrack.getInfo().title + "**");
                         return;
                     }
@@ -153,12 +178,11 @@ public class MusicPlaybackService {
 
                     int addedCount = 0;
                     for (AudioTrack t : playlist.getTracks()) {
-                        if (addedCount >= MAX_PLAYLIST_TRACKS) break;
+                        if (addedCount >= Math.min(MAX_PLAYLIST_TRACKS, session.settings().maxQueueSize())) break;
                         if (!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)) {
                             TrackContext context = TrackContext.create(playlist.getName(), t.getInfo().title, t.getInfo().author, t.getInfo().uri, source, userId, channelId);
                             t.setUserData(context);
-                            session.getScheduler().queue(t);
-                            addedCount++;
+                            if (session.getScheduler().queue(t)) addedCount++; else break;
                         }
                     }
 
@@ -194,9 +218,9 @@ public class MusicPlaybackService {
         }
 
         // SoundCloud hatasını Circuit Breaker'a bildir
-        SoundCloudCircuitBreaker.recordFailure();
+        SoundCloudCircuitBreaker.recordFailure(session.getGuildId(), failedTrack.getInfo().uri);
 
-        if (SoundCloudCircuitBreaker.isOpen()) {
+        if (SoundCloudCircuitBreaker.isOpen(session.getGuildId())) {
             logger.warn("⚡ SoundCloud circuit opened after consecutive failures. Queue advancing.");
             sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud oynatma hizmeti geçici olarak kullanılamıyor.");
             session.getScheduler().advanceQueueAfterException();
@@ -289,14 +313,14 @@ public class MusicPlaybackService {
             @Override
             public void trackLoaded(AudioTrack track) {
                 if (!isRecoveryStillCurrent(session, currentGen)) return;
-                AudioTrack alternative = isAlternativeCandidate(track, context) ? track : null;
+                AudioTrack alternative = isAlternativeCandidate(track, context, session.getGuildId()) ? track : null;
                 startAlternativeOrAdvance(session, alternative, context);
             }
 
             @Override
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (!isRecoveryStillCurrent(session, currentGen)) return;
-                startAlternativeOrAdvance(session, findAlternativeTrack(playlist.getTracks(), context), context);
+                startAlternativeOrAdvance(session, findAlternativeTrack(playlist.getTracks(), context, session.getGuildId()), context);
             }
 
             @Override
@@ -329,31 +353,35 @@ public class MusicPlaybackService {
         session.getScheduler().startFallbackTrack(alternative);
     }
 
-    private static AudioTrack findAlternativeTrack(List<AudioTrack> tracks, TrackContext context) {
-        for (AudioTrack track : tracks) {
-            if (isAlternativeCandidate(track, context)) {
-                return track;
-            }
-        }
-        return null;
+    private static AudioTrack findAlternativeTrack(List<AudioTrack> tracks, TrackContext context, long guildId) {
+        return tracks.stream().filter(t -> isAlternativeCandidate(t, context, guildId))
+                .max(Comparator.comparingDouble(t -> alternativeScore(t, context))).orElse(null);
     }
 
-    private static boolean isAlternativeCandidate(AudioTrack track, TrackContext context) {
+    private static boolean isAlternativeCandidate(AudioTrack track, TrackContext context, long guildId) {
         if (track == null || track.getInfo() == null || AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
             return false;
         }
 
         String candidateUri = canonicalUri(track.getInfo().uri);
         String originalUri = canonicalUri(context.permanentUri());
-        if (candidateUri.isBlank() || candidateUri.equals(originalUri)) {
+        if (candidateUri.isBlank() || candidateUri.equals(originalUri) || SoundCloudCircuitBreaker.isBlacklisted(guildId, track.getInfo().uri)) {
             return false;
         }
 
         String expectedTitle = normalizeTitle(firstNonBlank(context.title(), context.originalQuery(), ""));
         String candidateTitle = normalizeTitle(track.getInfo().title);
-        return !expectedTitle.isBlank()
-                && (candidateTitle.contains(expectedTitle) || expectedTitle.contains(candidateTitle));
+        return !expectedTitle.isBlank() && alternativeScore(track, context) >= 0.55;
     }
+
+    private static double alternativeScore(AudioTrack track, TrackContext context) {
+        double title=tokenSimilarity(normalizeTitle(firstNonBlank(context.title(),context.originalQuery(),"")),normalizeTitle(track.getInfo().title));
+        double author=tokenSimilarity(normalizeTitle(context.author()),normalizeTitle(track.getInfo().author));
+        double duration=1.0;
+        return title*0.72+author*0.18+duration*0.10;
+    }
+
+    private static double tokenSimilarity(String a,String b){if(a.isBlank()||b.isBlank())return 0;Set<String> x=new HashSet<>(List.of(a.split(" ")));Set<String> y=new HashSet<>(List.of(b.split(" ")));Set<String> intersection=new HashSet<>(x);intersection.retainAll(y);Set<String> union=new HashSet<>(x);union.addAll(y);return union.isEmpty()?0:(double)intersection.size()/union.size();}
 
     private static boolean isRecoveryStillCurrent(GuildAudioSession session, long generation) {
         return !session.isDestroyed() && session.getPlaybackGeneration() == generation;
@@ -394,7 +422,7 @@ public class MusicPlaybackService {
         StringBuilder sb = new StringBuilder();
         sb.append("\n=================== ❌ DETAYLI SOUNDCLOUD HATASI ❌ ===================\n");
         sb.append("Sunucu (Guild ID)    : ").append(guildId).append("\n");
-        sb.append("Parça Başlığı         : ").append(track != null ? track.getInfo().title : "Bilinmiyor").append("\n");
+        sb.append("Parça Başlığı         : ").append(track != null ? sanitizeLogText(track.getInfo().title) : "Bilinmiyor").append("\n");
         sb.append("Kalıcı Page URI       : ").append(track != null ? sanitizeUri(track.getInfo().uri) : "Bilinmiyor").append("\n");
         sb.append("Hata Derecesi (Sev)   : ").append(exception != null ? exception.severity : "Bilinmiyor").append("\n");
 
@@ -402,40 +430,61 @@ public class MusicPlaybackService {
             sb.append("Kaynak Türü           : ").append(context.source()).append("\n");
             sb.append("Re-Resolved Durumu    : ").append(context.isReResolved()).append("\n");
             sb.append("Kurtarma Denemesi     : ").append(context.fallbackAttempt()).append("\n");
-            sb.append("Orijinal Sorgu        : ").append(context.originalQuery()).append("\n");
+            sb.append("Orijinal Sorgu        : ").append(sanitizeLogText(context.originalQuery())).append("\n");
         }
 
         if (exception != null) {
-            sb.append("Hata Mesajı           : ").append(exception.getMessage()).append("\n");
+            sb.append("Hata Mesajı           : ").append(sanitizeLogText(exception.getMessage())).append("\n");
             sb.append("--- Exception Cause Zinciri ---\n");
             Throwable current = exception.getCause();
             int depth = 1;
             while (current != null) {
                 sb.append("  [Cause #").append(depth++).append("] ")
                   .append(current.getClass().getName()).append(": ")
-                  .append(current.getMessage()).append("\n");
+                  .append(sanitizeLogText(current.getMessage())).append("\n");
                 current = current.getCause();
             }
         }
         sb.append("====================================================================");
 
-        logger.error("❌ [Guild: {}] SoundCloud yürütme hatası | title={} | uri={} | severity={}",
+        logger.error("❌ [Guild: {}] SoundCloud yürütme hatası | title={} | uri={} | severity={} | type={}",
                 guildId,
-                track != null ? track.getInfo().title : "N/A",
+                track != null ? sanitizeLogText(track.getInfo().title) : "N/A",
                 track != null ? sanitizeUri(track.getInfo().uri) : "N/A",
                 exception != null ? exception.severity : "N/A",
-                exception);
+                exception != null ? exception.getClass().getSimpleName() : "N/A");
 
         logger.error(sb.toString());
     }
 
-    private static String sanitizeUri(String uri) {
+    public static String sanitizeUri(String uri) {
         if (uri == null) return "N/A";
         int queryIndex = uri.indexOf("?");
         if (queryIndex != -1) {
             return uri.substring(0, queryIndex);
         }
         return uri;
+    }
+
+    private static String sanitizeLogText(String text){if(text==null)return "N/A";String clean=text.replaceAll("(?i)(https?://[^?\\s]+)\\?\\S+","$1?[redacted]").replaceAll("[\\r\\n\\p{Cntrl}]"," ").strip();return clean.length()>300?clean.substring(0,300):clean;}
+
+    public static boolean isSafePublicUri(String uri) {
+        return uri != null && MediaInputPolicy.validate(uri, 1000).allowed();
+    }
+
+    /** Kuyruk bittiğinde benzer ve kara listede olmayan tek bir parçayı asenkron başlatır. */
+    public boolean tryAutoplay(GuildAudioSession session, AudioTrack finished) {
+        if (SoundCloudCircuitBreaker.isOpen(session.getGuildId()) || finished == null) return false;
+        String query="scsearch:"+finished.getInfo().title+" "+finished.getInfo().author;
+        long generation=session.getPlaybackGeneration();
+        audioPlayerManager.getPlayerManager().loadItemOrdered(session,query,new AudioLoadResultHandler(){
+            @Override public void trackLoaded(AudioTrack track){start(track);}
+            @Override public void playlistLoaded(AudioPlaylist list){AudioTrack chosen=list.getTracks().stream().filter(t->!canonicalUri(t.getInfo().uri).equals(canonicalUri(finished.getInfo().uri))).filter(t->!SoundCloudCircuitBreaker.isBlacklisted(session.getGuildId(),t.getInfo().uri)).filter(t->!AudioPlayerManager.isUnwantedMedia(t.getInfo().title)).findFirst().orElse(null);start(chosen);}
+            private void start(AudioTrack track){if(track==null||session.isDestroyed()||generation!=session.getPlaybackGeneration())return;track.setUserData(TrackContext.create("autoplay",track.getInfo().title,track.getInfo().author,track.getInfo().uri,PlaybackSource.SOUNDCLOUD,0,session.getLastMessageChannel()==null?0:session.getLastMessageChannel().getIdLong()));session.getScheduler().queue(track);sendChannelMessage(session.getLastMessageChannel(),"♾️ Otomatik çalma: **"+track.getInfo().title+"**");}
+            @Override public void noMatches(){}
+            @Override public void loadFailed(FriendlyException exception){notifier.report(session.getGuildId(),"autoplay-load",exception);}
+        });
+        return true;
     }
 
     public static String getFriendlyErrorMessage(FriendlyException exception) {

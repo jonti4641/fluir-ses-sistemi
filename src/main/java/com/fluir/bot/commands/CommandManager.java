@@ -13,12 +13,18 @@ import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+import net.dv8tion.jda.api.Permission;
+import com.fluir.bot.persistence.GuildSettings;
+import com.fluir.bot.persistence.StoredTrack;
+import com.fluir.bot.security.CommandRateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +46,8 @@ public class CommandManager extends ListenerAdapter {
     private static final Color BOT_COLOR = new Color(88, 101, 242);
 
     private final AudioPlayerManager audioPlayerManager;
+    private final CommandRateLimiter rateLimiter = new CommandRateLimiter(8, 10_000);
+    private final long startedAt = System.currentTimeMillis();
 
     public CommandManager(AudioPlayerManager audioPlayerManager) {
         this.audioPlayerManager = audioPlayerManager;
@@ -60,6 +68,16 @@ public class CommandManager extends ListenerAdapter {
         commands.add(Commands.slash("karistir", "Kuyruğu karıştırır"));
         commands.add(Commands.slash("yardim", "Komut listesini gösterir"));
         commands.add(Commands.slash("temizle", "Kuyruğu temizler"));
+        commands.add(Commands.slash("panel", "Gelişmiş müzik kontrol panelini gösterir"));
+        commands.add(Commands.slash("durum", "Bot, veritabanı ve SoundCloud durumunu gösterir"));
+        commands.add(Commands.slash("gecmis", "Son çalınan parçaları gösterir"));
+        commands.add(Commands.slash("kuyruk-yukle", "Kaydedilmiş kuyruğu geri yükler"));
+        commands.add(Commands.slash("favori", "Kişisel favorileri yönetir")
+                .addSubcommands(new SubcommandData("ekle","Çalan parçayı favorilere ekler"),new SubcommandData("liste","Favorileri gösterir"),new SubcommandData("sil","Sıra numarasıyla siler").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true),new SubcommandData("cal","Favoriyi çalar").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true)));
+        commands.add(Commands.slash("liste", "Sunucu çalma listelerini yönetir")
+                .addSubcommands(new SubcommandData("olustur","Liste oluşturur").addOption(OptionType.STRING,"ad","Liste adı",true),new SubcommandData("ekle","Çalan parçayı listeye ekler").addOption(OptionType.STRING,"ad","Liste adı",true),new SubcommandData("goster","Listeyi gösterir").addOption(OptionType.STRING,"ad","Liste adı",false),new SubcommandData("cal","Listeyi kuyruğa yükler").addOption(OptionType.STRING,"ad","Liste adı",true)));
+        commands.add(Commands.slash("ayar", "Sunucu müzik ayarlarını yönetir")
+                .addSubcommands(new SubcommandData("goster","Ayarları gösterir"),new SubcommandData("ses","Varsayılan ses").addOption(OptionType.INTEGER,"deger","0-150",true),new SubcommandData("bos-kalma","Ayrılma süresi").addOption(OptionType.INTEGER,"saniye","30-900",true),new SubcommandData("max-kuyruk","Kuyruk sınırı").addOption(OptionType.INTEGER,"deger","10-500",true),new SubcommandData("otomatik-cal","Otomatik çalma").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("duyurular","Çalıyor duyuruları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("prefix","Prefix komutları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("dj-rol","DJ rolü").addOption(OptionType.ROLE,"rol","Kontrol yetkili rol",true),new SubcommandData("dj-rol-sil","DJ rolü sınırlamasını kaldırır"),new SubcommandData("komut-kanal","Komut kanalı").addOption(OptionType.CHANNEL,"kanal","İzin verilen kanal",true),new SubcommandData("komut-kanal-sil","Komut kanalı sınırlamasını kaldırır")));
 
         jda.updateCommands().addCommands(commands).queue(
                 ok -> logger.info("✅ {} slash komutu kaydedildi.", commands.size()),
@@ -73,6 +91,9 @@ public class CommandManager extends ListenerAdapter {
             event.reply("❌ Bu komut sadece sunucularda kullanılabilir!").setEphemeral(true).queue();
             return;
         }
+        if (!rateLimiter.allow(event.getGuild().getIdLong(), event.getUser().getIdLong())) { event.reply("⏳ Çok hızlı komut gönderiyorsun; birkaç saniye bekle.").setEphemeral(true).queue(); return; }
+        GuildSettings policy=audioPlayerManager.getStore().settings(event.getGuild().getIdLong());
+        if(policy.commandChannelId()!=0&&event.getChannel().getIdLong()!=policy.commandChannelId()&&!isAdmin(event.getMember())){event.reply("❌ Müzik komutları bu sunucuda ayarlanan komut kanalında kullanılabilir.").setEphemeral(true).queue();return;}
 
         try {
             switch (event.getName()) {
@@ -87,15 +108,37 @@ public class CommandManager extends ListenerAdapter {
                 case "karistir" -> handleShuffleSlash(event);
                 case "yardim"   -> handleHelpSlash(event);
                 case "temizle"  -> handleClearSlash(event);
+                case "panel"    -> handlePanelSlash(event);
+                case "durum"    -> handleStatusSlash(event);
+                case "gecmis"   -> handleHistorySlash(event);
+                case "kuyruk-yukle" -> handleRestoreQueue(event);
+                case "favori"   -> handleFavorite(event);
+                case "liste"    -> handlePlaylist(event);
+                case "ayar"     -> handleSettings(event);
                 default         -> event.reply("❌ Bilinmeyen komut!").setEphemeral(true).queue();
             }
         } catch (Exception e) {
-            logger.error("Slash komut hatası [{}]: {}", event.getName(), e.getMessage(), e);
+            logger.error("Slash komut hatası [{}], type={}", event.getName(), e.getClass().getSimpleName());
             if (!event.isAcknowledged()) {
-                event.reply("❌ İşlem sırasında bir hata oluştu: " + e.getMessage()).setEphemeral(true).queue();
+                event.reply("❌ İşlem tamamlanamadı. Hata yöneticilere kaydedildi.").setEphemeral(true).queue();
             } else {
-                event.getHook().sendMessage("❌ İşlem sırasında bir hata oluştu: " + e.getMessage()).queue();
+                event.getHook().sendMessage("❌ İşlem tamamlanamadı. Hata yöneticilere kaydedildi.").queue();
             }
+            audioPlayerManager.getNotifier().report(event.getGuild().getIdLong(),"slash-"+event.getName(),e);
+        }
+    }
+
+    @Override public void onButtonInteraction(ButtonInteractionEvent event){
+        if(!event.getComponentId().startsWith("music:")||event.getGuild()==null)return;
+        GuildMessageChannel channel=event.getChannel() instanceof GuildMessageChannel g?g:null;
+        if(!validateControlPermissions(event.getMember(),event.getGuild(),channel,null)){event.reply("❌ Bu kontrol için botla aynı ses kanalında olmalısın.").setEphemeral(true).queue();return;}
+        GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());AudioTrack track=s.getScheduler().getCurrentTrack();
+        switch(event.getComponentId()){
+            case "music:pause"->{s.getPlayer().setPaused(!s.getPlayer().isPaused());event.reply(s.getPlayer().isPaused()?"⏸️ Duraklatıldı.":"▶️ Devam ediyor.").setEphemeral(true).queue();}
+            case "music:skip"->{s.getScheduler().nextTrack();event.reply("⏭️ Atlandı.").setEphemeral(true).queue();}
+            case "music:stop"->{audioPlayerManager.disconnect(event.getGuild());event.reply("⏹️ Durduruldu.").setEphemeral(true).queue();}
+            case "music:loop"->{s.getScheduler().setLoop(!s.getScheduler().isLoop());event.reply("🔁 Döngü "+(s.getScheduler().isLoop()?"açık.":"kapalı.")).setEphemeral(true).queue();}
+            case "music:favorite"->{if(track==null){event.reply("❌ Çalan parça yok.").setEphemeral(true).queue();return;}boolean added=audioPlayerManager.getStore().addFavorite(event.getGuild().getIdLong(),event.getUser().getIdLong(),StoredTrack.from(track));event.reply(added?"❤ Favorilere eklendi.":"ℹ️ Zaten favorilerinde.").setEphemeral(true).queue();}
         }
     }
 
@@ -193,9 +236,10 @@ public class CommandManager extends ListenerAdapter {
             });
 
         } catch (Exception e) {
-            logger.error("Panel seçim hatası: {}", e.getMessage(), e);
+            logger.error("Panel seçim hatası, type={}", e.getClass().getSimpleName());
+            if (event.getGuild() != null) audioPlayerManager.getNotifier().report(event.getGuild().getIdLong(),"search-panel",e);
             if (!event.isAcknowledged()) {
-                event.reply("❌ Parça başlatılırken hata oluştu: " + e.getMessage()).setEphemeral(true).queue();
+                event.reply("❌ Parça başlatılamadı. Hata güvenli şekilde kaydedildi.").setEphemeral(true).queue();
             }
         }
     }
@@ -216,6 +260,8 @@ public class CommandManager extends ListenerAdapter {
 
         Guild  guild  = event.getGuild();
         Member member = event.getMember();
+        GuildSettings policy=audioPlayerManager.getStore().settings(guild.getIdLong());
+        if(!policy.prefixCommands()||(policy.commandChannelId()!=0&&messageChannel.getIdLong()!=policy.commandChannelId()&&!isAdmin(member))||!rateLimiter.allow(guild.getIdLong(),event.getAuthor().getIdLong()))return;
 
         try {
             switch (cmd) {
@@ -263,13 +309,14 @@ public class CommandManager extends ListenerAdapter {
                 case "temizle", "clear" -> {
                     if (!validateControlPermissions(member, guild, messageChannel, null)) return;
                     GuildAudioSession s = audioPlayerManager.getOrCreateSession(guild);
-                    s.getScheduler().getQueue().clear();
+                    s.getScheduler().clearQueue();
                     messageChannel.sendMessage("🗑️ Kuyruk temizlendi.").queue();
                 }
                 case "yardim", "yardım", "help", "h" -> messageChannel.sendMessageEmbeds(buildHelpEmbed().build()).queue();
             }
         } catch (Exception e) {
-            logger.error("Prefix komut hatası [!{}]: {}", cmd, e.getMessage(), e);
+            logger.error("Prefix komut hatası [!{}], type={}", cmd, e.getClass().getSimpleName());
+            audioPlayerManager.getNotifier().report(guild.getIdLong(),"prefix-"+cmd,e);
         }
     }
 
@@ -413,11 +460,8 @@ public class CommandManager extends ListenerAdapter {
         GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
         if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
-        List<AudioTrack> list = new ArrayList<>(s.getScheduler().getQueue());
-        Collections.shuffle(list);
-        s.getScheduler().getQueue().clear();
-        s.getScheduler().getQueue().addAll(list);
-        event.getHook().sendMessage("🔀 **Kuyruk karıştırıldı!** (`" + list.size() + "` parça)").queue();
+        int count=s.getScheduler().shuffleQueue();
+        event.getHook().sendMessage("🔀 **Kuyruk karıştırıldı!** (`" + count + "` parça)").queue();
     }
 
     private void handleClearSlash(SlashCommandInteractionEvent event) {
@@ -425,7 +469,7 @@ public class CommandManager extends ListenerAdapter {
         GuildMessageChannel messageChannel = event.getChannel() instanceof GuildMessageChannel gmc ? gmc : null;
         if (!validateControlPermissions(event.getMember(), event.getGuild(), messageChannel, event.getHook())) return;
         GuildAudioSession s = audioPlayerManager.getOrCreateSession(event.getGuild());
-        s.getScheduler().getQueue().clear();
+        s.getScheduler().clearQueue();
         event.getHook().sendMessage("🗑️ **Kuyruk temizlendi.**").queue();
     }
 
@@ -433,7 +477,78 @@ public class CommandManager extends ListenerAdapter {
         event.replyEmbeds(buildHelpEmbed().build()).queue();
     }
 
+    private void handlePanelSlash(SlashCommandInteractionEvent event){
+        GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());AudioTrack track=s.getScheduler().getCurrentTrack();
+        if(track==null){event.reply("❌ Şu an çalan parça yok.").setEphemeral(true).queue();return;}
+        event.replyEmbeds(NowPlayingPanel.embed(track,s).build()).addComponents(NowPlayingPanel.controls(s)).queue();
+    }
+
+    private void handleStatusSlash(SlashCommandInteractionEvent event){
+        GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());long used=Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory();
+        EmbedBuilder e=new EmbedBuilder().setTitle("🩺 Fluir Durumu").setColor(audioPlayerManager.getStore().isHealthy()?Color.GREEN:Color.RED)
+                .addField("Discord gecikmesi",event.getJDA().getGatewayPing()+" ms",true).addField("Aktif oturum",String.valueOf(audioPlayerManager.getSessionCount()),true)
+                .addField("Kuyruk",String.valueOf(s.getScheduler().getQueue().size()),true).addField("SoundCloud",SoundCloudCircuitBreaker.status(event.getGuild().getIdLong()),true)
+                .addField("Veritabanı",audioPlayerManager.getStore().isHealthy()?"✅ Sağlıklı":"❌ Sorunlu",true).addField("Bellek",(used/1024/1024)+" MiB",true)
+                .addField("Çalışma süresi",TrackScheduler.formatDuration(System.currentTimeMillis()-startedAt),true).addField("Son incident",audioPlayerManager.getNotifier().lastIncidentId(),true);
+        event.replyEmbeds(e.build()).setEphemeral(true).queue();
+    }
+
+    private void handleHistorySlash(SlashCommandInteractionEvent event){
+        List<StoredTrack> tracks=audioPlayerManager.getStore().history(event.getGuild().getIdLong(),10);event.reply(renderTracks("🕘 Son Çalınanlar",tracks)).setEphemeral(true).queue();
+    }
+
+    private void handleRestoreQueue(SlashCommandInteractionEvent event){
+        Member member=event.getMember();AudioChannel vc=getUserAudioChannel(member,null);if(vc==null){event.reply("❌ Bir ses kanalında olmalısın.").setEphemeral(true).queue();return;}
+        List<StoredTrack> tracks=audioPlayerManager.getStore().queue(event.getGuild().getIdLong(),audioPlayerManager.getStore().settings(event.getGuild().getIdLong()).maxQueueSize());
+        if(tracks.isEmpty()){event.reply("ℹ️ Kaydedilmiş kuyruk yok.").setEphemeral(true).queue();return;}event.deferReply(true).queue();
+        GuildMessageChannel channel=event.getChannel() instanceof GuildMessageChannel g?g:null;for(StoredTrack t:tracks)audioPlayerManager.getPlaybackService().processPlayRequest(event.getGuild(),vc,channel,null,t.uri(),false);
+        event.getHook().sendMessage("✅ `"+tracks.size()+"` kayıt geri yüklenmek üzere işlendi.").queue();
+    }
+
+    private void handleFavorite(SlashCommandInteractionEvent event){
+        String sub=event.getSubcommandName();long guild=event.getGuild().getIdLong(),user=event.getUser().getIdLong();GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());
+        switch(sub==null?"":sub){
+            case "ekle"->{AudioTrack t=s.getScheduler().getCurrentTrack();if(t==null){event.reply("❌ Çalan parça yok.").setEphemeral(true).queue();return;}event.reply(audioPlayerManager.getStore().addFavorite(guild,user,StoredTrack.from(t))?"❤ Favorilere eklendi.":"ℹ️ Zaten favorilerinde.").setEphemeral(true).queue();}
+            case "liste"->event.reply(renderTracks("❤ Favoriler",audioPlayerManager.getStore().favorites(guild,user,20))).setEphemeral(true).queue();
+            case "sil"->{int i=(int)event.getOption("sira").getAsLong();event.reply(audioPlayerManager.getStore().removeFavorite(guild,user,i)?"✅ Favori silindi.":"❌ Geçersiz sıra.").setEphemeral(true).queue();}
+            case "cal"->{int i=(int)event.getOption("sira").getAsLong();List<StoredTrack> f=audioPlayerManager.getStore().favorites(guild,user,100);if(i<1||i>f.size()){event.reply("❌ Geçersiz sıra.").setEphemeral(true).queue();return;}AudioChannel vc=getUserAudioChannel(event.getMember(),null);if(vc==null){event.reply("❌ Bir ses kanalında olmalısın.").setEphemeral(true).queue();return;}event.deferReply().queue();audioPlayerManager.getPlaybackService().processPlayRequest(event.getGuild(),vc,event.getChannel() instanceof GuildMessageChannel g?g:null,event.getHook(),f.get(i-1).uri(),false);}
+        }
+    }
+
+    private void handlePlaylist(SlashCommandInteractionEvent event){
+        String sub=event.getSubcommandName();String name=event.getOption("ad")==null?"":event.getOption("ad").getAsString();long guild=event.getGuild().getIdLong();
+        switch(sub==null?"":sub){
+            case "olustur"->event.reply(audioPlayerManager.getStore().createPlaylist(guild,event.getUser().getIdLong(),name)?"✅ Liste oluşturuldu.":"ℹ️ Bu ad zaten kullanılıyor.").setEphemeral(true).queue();
+            case "ekle"->{AudioTrack t=audioPlayerManager.getOrCreateSession(event.getGuild()).getScheduler().getCurrentTrack();if(t==null){event.reply("❌ Çalan parça yok.").setEphemeral(true).queue();return;}event.reply(audioPlayerManager.getStore().addPlaylistTrack(guild,name,StoredTrack.from(t))?"✅ Listeye eklendi.":"❌ Liste bulunamadı.").setEphemeral(true).queue();}
+            case "goster"->{if(name.isBlank()){List<String> names=audioPlayerManager.getStore().playlists(guild,50);event.reply(names.isEmpty()?"ℹ️ Liste yok.":"📚 **Listeler:** "+String.join(", ",names)).setEphemeral(true).queue();}else event.reply(renderTracks("📚 "+name,audioPlayerManager.getStore().playlist(guild,name,50))).setEphemeral(true).queue();}
+            case "cal"->{List<StoredTrack> tracks=audioPlayerManager.getStore().playlist(guild,name,100);AudioChannel vc=getUserAudioChannel(event.getMember(),null);if(tracks.isEmpty()||vc==null){event.reply("❌ Liste boş/bulunamadı veya ses kanalında değilsin.").setEphemeral(true).queue();return;}event.deferReply(true).queue();GuildMessageChannel c=event.getChannel() instanceof GuildMessageChannel g?g:null;for(StoredTrack t:tracks)audioPlayerManager.getPlaybackService().processPlayRequest(event.getGuild(),vc,c,null,t.uri(),false);event.getHook().sendMessage("✅ Liste kuyruğa yükleniyor.").queue();}
+        }
+    }
+
+    private void handleSettings(SlashCommandInteractionEvent event){
+        GuildSettings old=audioPlayerManager.getStore().settings(event.getGuild().getIdLong());String sub=event.getSubcommandName();
+        if("goster".equals(sub)){event.reply("⚙️ Ses: `"+old.defaultVolume()+"` • Boş kalma: `"+old.idleSeconds()+"s` • Maks. kuyruk: `"+old.maxQueueSize()+"` • Otomatik: `"+old.autoplay()+"` • Duyuru: `"+old.announcements()+"` • Prefix: `"+old.prefixCommands()+"` • DJ rol: `"+old.djRoleId()+"` • Kanal: `"+old.commandChannelId()+"`").setEphemeral(true).queue();return;}
+        if(!isAdmin(event.getMember())){event.reply("❌ Ayarları değiştirmek için Sunucuyu Yönet izni gerekli.").setEphemeral(true).queue();return;}
+        GuildSettings n=switch(sub==null?"":sub){
+            case "ses"->new GuildSettings(old.guildId(),(int)event.getOption("deger").getAsLong(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),old.djRoleId(),old.commandChannelId());
+            case "bos-kalma"->new GuildSettings(old.guildId(),old.defaultVolume(),(int)event.getOption("saniye").getAsLong(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),old.djRoleId(),old.commandChannelId());
+            case "max-kuyruk"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),(int)event.getOption("deger").getAsLong(),old.autoplay(),old.announcements(),old.prefixCommands(),old.djRoleId(),old.commandChannelId());
+            case "otomatik-cal"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),event.getOption("aktif").getAsBoolean(),old.announcements(),old.prefixCommands(),old.djRoleId(),old.commandChannelId());
+            case "duyurular"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),event.getOption("aktif").getAsBoolean(),old.prefixCommands(),old.djRoleId(),old.commandChannelId());
+            case "prefix"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),event.getOption("aktif").getAsBoolean(),old.djRoleId(),old.commandChannelId());
+            case "dj-rol"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),event.getOption("rol").getAsRole().getIdLong(),old.commandChannelId());
+            case "dj-rol-sil"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),0,old.commandChannelId());
+            case "komut-kanal"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),old.djRoleId(),event.getOption("kanal").getAsChannel().getIdLong());
+            case "komut-kanal-sil"->new GuildSettings(old.guildId(),old.defaultVolume(),old.idleSeconds(),old.maxQueueSize(),old.autoplay(),old.announcements(),old.prefixCommands(),old.djRoleId(),0);
+            default->old;};audioPlayerManager.getStore().saveSettings(n);audioPlayerManager.getOrCreateSession(event.getGuild()).getPlayer().setVolume(n.normalized().defaultVolume());event.reply("✅ Sunucu ayarı kaydedildi.").setEphemeral(true).queue();
+    }
+
+    private static String renderTracks(String title,List<StoredTrack> tracks){if(tracks.isEmpty())return "ℹ️ "+title+" boş.";StringBuilder b=new StringBuilder("**").append(title).append("**\n");int i=1;for(StoredTrack t:tracks)b.append('`').append(i++).append(".` ").append(t.title()).append(" — ").append(t.author()).append('\n');return b.length()>1900?b.substring(0,1900):b.toString();}
+    private static boolean isAdmin(Member member){return member!=null&&member.hasPermission(Permission.MANAGE_SERVER);}
+
     public boolean validateControlPermissions(Member member, Guild guild, GuildMessageChannel messageChannel, InteractionHook hook) {
+        GuildSettings settings=audioPlayerManager.getStore().settings(guild.getIdLong());
+        if(settings.djRoleId()!=0&&!isAdmin(member)&&(member==null||member.getRoles().stream().noneMatch(r->r.getIdLong()==settings.djRoleId()))){sendError(hook,messageChannel,"❌ Bu kontrol için ayarlanmış DJ rolü gerekli.");return false;}
         AudioChannel userChannel = getUserAudioChannel(member, messageChannel);
         if (userChannel == null) return false;
 

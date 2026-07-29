@@ -45,7 +45,7 @@ public class VoiceUpdateListener extends ListenerAdapter {
 
         if (humanCount == 0) {
             logger.info("👥 [Guild: {}] Kanalda insan üye kalmadı, yalnız kalma timer'ı başlatılıyor.", guild.getId());
-            session.scheduleAloneTimer(guild, 60);
+            session.scheduleAloneTimer(guild, Math.max(30, session.settings().idleSeconds()));
         } else {
             logger.debug("👥 [Guild: {}] Kanalda {} insan üye var, yalnız kalma timer'ı iptal ediliyor.", guild.getId(), humanCount);
             session.cancelAloneTimer();

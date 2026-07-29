@@ -2,8 +2,9 @@ package com.fluir.bot.audio;
 
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.source.bandcamp.BandcampAudioSourceManager;
-import com.sedmelluq.discord.lavaplayer.source.http.HttpAudioSourceManager;
-import com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager;
+import com.fluir.bot.config.BotConfig;
+import com.fluir.bot.monitoring.SecureWebhookNotifier;
+import com.fluir.bot.persistence.PersistentStore;
 import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
@@ -26,11 +27,21 @@ public class AudioPlayerManager {
     private final DefaultAudioPlayerManager playerManager;
     private final Map<Long, GuildAudioSession> sessions;
     private final MusicPlaybackService playbackService;
+    private final PersistentStore store;
+    private final BotConfig config;
+    private final SecureWebhookNotifier notifier;
 
     public AudioPlayerManager() {
+        this(BotConfig.load(), new PersistentStore(BotConfig.load().dataDirectory()), new SecureWebhookNotifier(""));
+    }
+
+    public AudioPlayerManager(BotConfig config, PersistentStore store, SecureWebhookNotifier notifier) {
         this.playerManager = new DefaultAudioPlayerManager();
         this.sessions = new ConcurrentHashMap<>();
-        this.playbackService = new MusicPlaybackService(this);
+        this.store = store;
+        this.config = config;
+        this.notifier = notifier;
+        this.playbackService = new MusicPlaybackService(this, store, config, notifier);
         registerSources();
     }
 
@@ -47,18 +58,16 @@ public class AudioPlayerManager {
             logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage(), e);
         }
 
-        // 2. Diğer Desteklenen Kaynaklar (Bandcamp, Vimeo, Twitch, HTTP, Local)
+        // Güvenlik: genel HTTP ve yerel dosya kaynakları özellikle kaydedilmez (SSRF/LFI koruması).
         try { playerManager.registerSourceManager(new BandcampAudioSourceManager()); } catch (Exception e) { logger.warn("Bandcamp kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new VimeoAudioSourceManager()); } catch (Exception e) { logger.warn("Vimeo kaydı atlandı: {}", e.getMessage()); }
         try { playerManager.registerSourceManager(new TwitchStreamAudioSourceManager()); } catch (Exception e) { logger.warn("Twitch kaydı atlandı: {}", e.getMessage()); }
-        try { playerManager.registerSourceManager(new HttpAudioSourceManager()); } catch (Exception e) { logger.warn("HTTP kaydı atlandı: {}", e.getMessage()); }
-        try { playerManager.registerSourceManager(new LocalAudioSourceManager()); } catch (Exception e) { logger.warn("Local kaydı atlandı: {}", e.getMessage()); }
 
         logger.info("🎵 Ses kaynakları kayıt işlemi tamamlandı.");
     }
 
     public GuildAudioSession getOrCreateSession(Guild guild) {
-        return sessions.computeIfAbsent(guild.getIdLong(), id -> new GuildAudioSession(id, playerManager, playbackService));
+        return sessions.computeIfAbsent(guild.getIdLong(), id -> new GuildAudioSession(id, playerManager, playbackService, store, notifier));
     }
 
     public GuildAudioSession getSession(long guildId) {
@@ -110,4 +119,8 @@ public class AudioPlayerManager {
 
     public DefaultAudioPlayerManager getPlayerManager() { return playerManager; }
     public MusicPlaybackService getPlaybackService() { return playbackService; }
+    public PersistentStore getStore() { return store; }
+    public BotConfig getConfig() { return config; }
+    public SecureWebhookNotifier getNotifier() { return notifier; }
+    public int getSessionCount() { return sessions.size(); }
 }

@@ -14,6 +14,10 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.ArrayList;
+import java.util.Collections;
+import com.fluir.bot.persistence.StoredTrack;
+import com.fluir.bot.persistence.GuildSettings;
 
 /**
  * Parça sıralama ve event yönetimi sınıfı.
@@ -49,12 +53,18 @@ public class TrackScheduler extends AudioEventAdapter {
 
             session.cancelIdleTimer();
 
+            if (queue.size() >= settings().maxQueueSize()) {
+                logger.warn("[Guild: {}] Kuyruk sınırı aşıldı", session.getGuildId());
+                return false;
+            }
             if (!player.startTrack(track, true)) {
                 boolean added = queue.offer(track);
+                persistQueue();
                 logger.info("📋 [Guild: {}] Kuyruğa eklendi: {} (Kuyruk boyutu: {})", session.getGuildId(), track.getInfo().title, queue.size());
                 return added;
             } else {
                 this.currentTrack = track;
+                persistQueue();
                 logger.info("🎵 [Guild: {}] Doğrudan çalınmaya başlandı: {}", session.getGuildId(), track.getInfo().title);
                 return true;
             }
@@ -72,11 +82,13 @@ public class TrackScheduler extends AudioEventAdapter {
             if (next != null) {
                 this.currentTrack = next;
                 player.startTrack(next, false);
+                persistQueue();
                 logger.info("⏭️ [Guild: {}] Sonraki parçaya geçildi: {}", session.getGuildId(), next.getInfo().title);
                 return true;
             } else {
                 this.currentTrack = null;
                 player.stopTrack();
+                persistQueue();
                 logger.info("⏹️ [Guild: {}] Kuyruk bitti, çalma durdu.", session.getGuildId());
                 return false;
             }
@@ -94,6 +106,7 @@ public class TrackScheduler extends AudioEventAdapter {
             queue.clear();
             currentTrack = null;
             player.stopTrack();
+            persistQueue();
             logger.info("⏹️ [Guild: {}] Çalma durduruldu ve kuyruk temizlendi.", session.getGuildId());
         } finally {
             schedulerLock.unlock();
@@ -107,6 +120,7 @@ public class TrackScheduler extends AudioEventAdapter {
             isHandlingException.set(false);
             this.currentTrack = fallbackTrack;
             player.startTrack(fallbackTrack, false);
+            persistQueue();
             logger.info("🔄 [Guild: {}] Re-resolved SoundCloud parçası başlatıldı: {}", session.getGuildId(), fallbackTrack.getInfo().title);
         } finally {
             schedulerLock.unlock();
@@ -134,13 +148,8 @@ public class TrackScheduler extends AudioEventAdapter {
             session.cancelIdleTimer();
             logger.info("▶️ [Guild: {}] Çalıyor: {}", session.getGuildId(), track.getInfo().title);
 
-            GuildMessageChannel announcementChannel = session.getLastMessageChannel();
-            if (announcementChannel != null) {
-                announcementChannel.sendMessage(
-                        "⏳ **Parça hazırlanıyor:** `" + track.getInfo().title + "`\n" +
-                        "👤 Sanatçı: `" + track.getInfo().author + "` | ⏱️ Süre: `" + formatDuration(track.getDuration()) + "`"
-                ).queue(null, err -> logger.warn("Duyuru mesajı gönderilemedi: {}", err.getMessage()));
-            }
+            session.armFirstFrame();
+            persistQueue();
         } finally {
             schedulerLock.unlock();
         }
@@ -182,6 +191,8 @@ public class TrackScheduler extends AudioEventAdapter {
             if (endReason.mayStartNext) {
                 boolean hasNext = nextTrack();
                 if (!hasNext && queue.isEmpty()) {
+                    if (endReason == AudioTrackEndReason.FINISHED && settings().autoplay()
+                            && session.getPlaybackService().tryAutoplay(session, track)) return;
                     scheduleIdleDisconnect();
                 }
             }
@@ -193,14 +204,14 @@ public class TrackScheduler extends AudioEventAdapter {
     private void scheduleIdleDisconnect() {
         GuildMessageChannel messageChannel = session.getLastMessageChannel();
         Guild guild = messageChannel != null ? messageChannel.getGuild() : null;
-        session.scheduleIdleTimer(guild, 90);
+        session.scheduleIdleTimer(guild, settings().idleSeconds());
     }
 
     @Override
     public void onTrackException(AudioPlayer player, AudioTrack track, FriendlyException exception) {
         schedulerLock.lock();
         try {
-            logger.error("❌ [Guild: {}] Parça yürütme hatası [{}]: {}", session.getGuildId(), track.getInfo().title, exception.getMessage());
+            logger.error("❌ [Guild: {}] Parça yürütme hatası [{}], severity={}", session.getGuildId(), safeLog(track.getInfo().title), exception.severity);
 
             if (isHandlingException.getAndSet(true)) {
                 logger.debug("Zaten exception işleniyor, mükerrer çağrı es geçildi.");
@@ -237,4 +248,16 @@ public class TrackScheduler extends AudioEventAdapter {
     public AudioTrack getCurrentTrack() { return currentTrack; }
     public AudioPlayer getPlayer() { return player; }
     public GuildAudioSession getSession() { return session; }
+    private GuildSettings settings() { GuildSettings value=session.settings(); return value==null?GuildSettings.defaults(session.getGuildId()):value; }
+    private static String safeLog(String value){if(value==null)return "N/A";String clean=value.replaceAll("[\\r\\n\\p{Cntrl}]"," ");return clean.length()>120?clean.substring(0,120):clean;}
+
+    public void clearQueue() { schedulerLock.lock(); try { queue.clear(); persistQueue(); } finally { schedulerLock.unlock(); } }
+    public int shuffleQueue() { schedulerLock.lock(); try { var tracks=new ArrayList<>(queue); Collections.shuffle(tracks); queue.clear(); queue.addAll(tracks); persistQueue(); return tracks.size(); } finally { schedulerLock.unlock(); } }
+    public void persistQueue() {
+        if (session.getStore() == null) return;
+        var tracks = new ArrayList<StoredTrack>();
+        if (currentTrack != null) tracks.add(StoredTrack.from(currentTrack));
+        queue.stream().map(StoredTrack::from).forEach(tracks::add);
+        session.getStore().saveQueue(session.getGuildId(), tracks);
+    }
 }

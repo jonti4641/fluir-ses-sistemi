@@ -44,6 +44,8 @@ desktop.ini
 # ========================
 logs/
 *.log
+data/
+.verification-tools*/
 
 # ========================
 # Railway

@@ -10,6 +10,11 @@ import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fluir.bot.monitoring.SecureWebhookNotifier;
+import com.fluir.bot.persistence.GuildSettings;
+import com.fluir.bot.persistence.PersistentStore;
+import com.fluir.bot.persistence.StoredTrack;
+import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -33,6 +38,8 @@ public class GuildAudioSession {
     private final ReentrantLock sessionLock = new ReentrantLock();
     private final AtomicLong playbackGeneration = new AtomicLong(0);
     private final MusicPlaybackService playbackService;
+    private final PersistentStore store;
+    private final SecureWebhookNotifier notifier;
 
     private volatile VoiceConnectionState connectionState = VoiceConnectionState.DISCONNECTED;
     private volatile AudioChannel currentChannel;
@@ -42,12 +49,20 @@ public class GuildAudioSession {
     private volatile boolean isDestroyed = false;
 
     public GuildAudioSession(long guildId, AudioPlayerManager lavaPlayerManager, MusicPlaybackService playbackService) {
+        this(guildId, lavaPlayerManager, playbackService, null, new SecureWebhookNotifier(""));
+    }
+
+    public GuildAudioSession(long guildId, AudioPlayerManager lavaPlayerManager, MusicPlaybackService playbackService,
+                             PersistentStore store, SecureWebhookNotifier notifier) {
         this.guildId = guildId;
         this.player = lavaPlayerManager.createPlayer();
         this.playbackService = playbackService;
+        this.store = store;
+        this.notifier = notifier;
         this.scheduler = new TrackScheduler(this.player, this);
         this.player.addListener(this.scheduler);
-        this.sendHandler = new AudioPlayerSendHandler(this.player);
+        this.sendHandler = new AudioPlayerSendHandler(this.player, this::onFirstAudioFrame);
+        this.player.setVolume(settings().defaultVolume());
     }
 
     public ConnectionResult ensureConnected(Guild guild, AudioChannel targetChannel, GuildMessageChannel messageChannel) {
@@ -115,8 +130,9 @@ public class GuildAudioSession {
         } catch (Exception e) {
             this.connectionState = VoiceConnectionState.DISCONNECTED;
             this.currentChannel = null;
-            logger.error("❌ [Guild: {}] Ses kanalına bağlanırken hata: {}", guildId, e.getMessage(), e);
-            return new ConnectionResult(false, "❌ Ses kanalına bağlanılamadı: " + e.getMessage());
+            logger.error("❌ [Guild: {}] Ses kanalına bağlanırken hata, type={}", guildId, e.getClass().getSimpleName());
+            notifier.report(guildId, "voice-connect", e);
+            return new ConnectionResult(false, "❌ Ses kanalına bağlanılamadı. Lütfen izinleri kontrol edin.");
         } finally {
             sessionLock.unlock();
         }
@@ -245,6 +261,23 @@ public class GuildAudioSession {
     public long getPlaybackGeneration() { return playbackGeneration.get(); }
     public long nextPlaybackGeneration() { return playbackGeneration.incrementAndGet(); }
     public MusicPlaybackService getPlaybackService() { return playbackService; }
+    public GuildSettings settings() { return store == null ? GuildSettings.defaults(guildId) : store.settings(guildId); }
+    public PersistentStore getStore() { return store; }
+
+    public void armFirstFrame() { sendHandler.armFirstFrameNotification(); }
+
+    private void onFirstAudioFrame() {
+        AudioTrack track = scheduler.getCurrentTrack();
+        if (track == null) return;
+        if (store != null) store.addHistory(guildId, StoredTrack.from(track));
+        SoundCloudCircuitBreaker.recordSuccess(guildId, track.getInfo().uri);
+        GuildMessageChannel channel = lastMessageChannel;
+        if (channel != null && settings().announcements()) {
+            channel.sendMessageEmbeds(NowPlayingPanel.embed(track, this).build())
+                    .setComponents(NowPlayingPanel.controls(this)).queue(null,
+                            err -> logger.warn("Duyuru gönderilemedi [Guild: {}]", guildId));
+        }
+    }
 
     public record ConnectionResult(boolean success, String message) {}
 }
