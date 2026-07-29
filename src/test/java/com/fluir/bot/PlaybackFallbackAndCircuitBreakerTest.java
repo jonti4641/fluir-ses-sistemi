@@ -90,6 +90,10 @@ class PlaybackFallbackAndCircuitBreakerTest {
         TrackContext reResolved = initial.markReResolved();
         assertTrue(reResolved.isReResolved());
         assertEquals(1, reResolved.fallbackAttempt());
+
+        TrackContext alternativeResolved = reResolved.markAlternativeResolved();
+        assertTrue(alternativeResolved.isReResolved());
+        assertEquals(2, alternativeResolved.fallbackAttempt());
     }
 
     @Test
