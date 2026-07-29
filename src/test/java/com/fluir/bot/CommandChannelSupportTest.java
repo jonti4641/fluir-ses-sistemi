@@ -5,8 +5,8 @@ import com.fluir.bot.audio.GuildAudioSession;
 
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
+import net.dv8tion.jda.api.entities.SelfMember;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
@@ -31,7 +31,7 @@ class CommandChannelSupportTest {
     @Mock private TextChannel mockTextChannel;
     @Mock private VoiceChannel mockVoiceChannel;
     @Mock private GuildChannel mockUnsupportedChannel;
-    @Mock private Member mockMember;
+    @Mock private SelfMember mockMember;
     @Mock private GuildVoiceState mockVoiceState;
     @Mock private AudioChannel mockAudioChannel;
 
