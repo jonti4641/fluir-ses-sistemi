@@ -91,7 +91,7 @@
     byId("player").replaceChildren();playerFrame=document.createElement("iframe");playerFrame.id="youtube-player";playerFrame.title="Fluir video yayını";
     playerFrame.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";playerFrame.allowFullscreen=true;playerFrame.loading="eager";playerFrame.referrerPolicy="strict-origin-when-cross-origin";
     const origin=location.origin,params=new URLSearchParams({enablejsapi:"1",autoplay:"1",playsinline:"1",rel:"0",controls:"0",disablekb:"1",fs:"0",origin,widget_referrer:origin});
-    playerFrame.src="/youtube/embed/"+encodeURIComponent(id)+"?"+params;
+    playerFrame.src="/youtube-embed/"+encodeURIComponent(id)+"?"+params;
     playerFrame.onload=()=>{playerReady=true;byId("loading").classList.add("hidden");announceListener();setTimeout(announceListener,400);setTimeout(announceListener,1200);fetchState();showControls()};
     byId("player").appendChild(playerFrame);
   }

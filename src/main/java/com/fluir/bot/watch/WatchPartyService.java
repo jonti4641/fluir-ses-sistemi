@@ -41,7 +41,9 @@ public final class WatchPartyService {
     private static final Duration PENDING_TTL = Duration.ofMinutes(2);
     private static final int MAX_ROOMS = 1_000;
     private static final int MAX_CONTROL_BODY = 2_048;
+    private static final int MAX_YOUTUBE_EMBED_BYTES = 2 * 1024 * 1024;
     private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
+    private static final Pattern HTML_NONCE_ATTRIBUTE = Pattern.compile("(?i)\\snonce=(?:\"[^\"]*\"|'[^']*')");
     private static final String CONTROL_COOKIE = "__Host-FluirControl";
 
     private final String publicBaseUrl;
@@ -77,9 +79,79 @@ public final class WatchPartyService {
         server.createContext("/api/watch", this::handleApi);
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
+        server.createContext("/youtube-embed/", this::handleYouTubeEmbed);
         server.createContext("/s/", this::handleYouTubeAsset);
         server.createContext("/yts/", this::handleYouTubeAsset);
         server.createContext("/", this::handleActivityPage);
+    }
+
+    /**
+     * YouTube'un resmi embed HTML'ini sabit kaynaktan alır. YouTube'un CSP nonce
+     * değerleri Discord'un Activity proxy'sinde yeniden üretilen nonce ile çakıştığı
+     * için yalnızca nonce öznitelikleri temizlenir; video verisi burada aktarılmaz.
+     */
+    private void handleYouTubeEmbed(HttpExchange exchange) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod()) && !"HEAD".equals(exchange.getRequestMethod())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        String path = exchange.getRequestURI().getPath();
+        String videoId = pathPart(path, 2);
+        if (videoId == null || !VIDEO_ID.matcher(videoId).matches()
+                || !path.equals("/youtube-embed/" + videoId)) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_youtube_source\"}");
+            return;
+        }
+        URI target;
+        try {
+            target = new URI("https", "www.youtube.com", "/embed/" + videoId,
+                    exchange.getRequestURI().getRawQuery(), null);
+        } catch (Exception e) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_youtube_source\"}");
+            return;
+        }
+        HttpRequest request = HttpRequest.newBuilder(target)
+                .timeout(Duration.ofSeconds(12))
+                .header("Accept", "text/html,application/xhtml+xml")
+                .header("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.7")
+                .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0")
+                .GET().build();
+        try {
+            HttpResponse<InputStream> response = youtubeAssets.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() != 200) {
+                response.body().close();
+                sendJson(exchange, 502, "{\"error\":\"youtube_embed_unavailable\"}");
+                return;
+            }
+            byte[] raw;
+            try (InputStream input = response.body()) {
+                raw = input.readNBytes(MAX_YOUTUBE_EMBED_BYTES + 1);
+            }
+            if (raw.length > MAX_YOUTUBE_EMBED_BYTES) {
+                sendJson(exchange, 502, "{\"error\":\"youtube_embed_too_large\"}");
+                return;
+            }
+            String normalized = HTML_NONCE_ATTRIBUTE.matcher(new String(raw, StandardCharsets.UTF_8)).replaceAll("");
+            byte[] body = normalized.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+            exchange.getResponseHeaders().set("Referrer-Policy", "strict-origin-when-cross-origin");
+            if ("HEAD".equals(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(200, -1);
+                return;
+            }
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJson(exchange, 503, "{\"error\":\"youtube_embed_interrupted\"}");
+        } catch (IOException e) {
+            logger.warn("YouTube embed sayfası alınamadı: {}", e.getClass().getSimpleName());
+            if (exchange.getResponseCode() < 0) sendJson(exchange, 502, "{\"error\":\"youtube_embed_unavailable\"}");
+        }
     }
 
     public void configureApplication(String applicationId) {

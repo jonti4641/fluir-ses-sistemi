@@ -61,6 +61,7 @@ class PanelAndWatchPartyTest {
             String activity = new String(input.readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(activity.contains("autoplay:\"1\""));
             assertTrue(activity.contains("controls:\"0\""));
+            assertTrue(activity.contains("/youtube-embed/"));
             assertTrue(activity.contains("playerFrame.onload"));
             assertTrue(activity.contains("Yayını yalnızca oda sahibi yönetebilir"));
             assertTrue(activity.contains("requestFullscreen"));
