@@ -90,8 +90,7 @@ başka bir HTTPS alan adı kullanılabilir.
 
 1. Discord Developer Portal'da bot uygulamasını açıp **Activities → Settings → Enable Activities** seçeneğini etkinleştir.
 2. Railway Public Networking ile oluşan alan adını kopyala (ör. `fluir-production.up.railway.app`).
-3. **Activities → URL Mappings** altında, aşağıdaki sırayla üç eşleme ekle:
-   - `/googlevideo/{subdomain}` → `{subdomain}.googlevideo.com`
+3. **Activities → URL Mappings** altında iki eşleme ekle:
    - `/youtube` → `www.youtube.com`
    - `/` → Railway alan adı (yalnızca alan adı; `https://` ekleme)
 4. Desktop ve Mobile destek platformlarını etkinleştir. Test hesabında Discord Developer Mode açık olmalı.
@@ -100,6 +99,9 @@ başka bir HTTPS alan adı kullanılabilir.
 
 Activity oturumu backend tarafından Discord'un Activity Instance API'siyle doğrulanır. Oda isteği
 iki dakika içinde Activity tarafından alınmazsa iptal edilir; oda ve kontrol istekleri oran sınırlıdır.
+Video CDN istekleri ayrı bir portal eşlemesi gerektirmez. Fluir yalnızca YouTube'un imzalı
+`googlevideo.com` medya yollarını, alan adı ve yol doğrulamasıyla Railway üzerinden aktarır;
+keyfi URL proxy'lenmez.
 Oynatma kontrolleri yalnızca odayı ilk açan tarayıcıya verilen `Secure`, `HttpOnly`, bölümlenmiş
 yetki çereziyle çalışır. Uygulama kamera, mikrofon, konum, ekran yakalama veya pano izni istemez ve
 oran sınırlama için istemci IP adresini okumaz.
@@ -153,4 +155,3 @@ fluir-ses-sistemi/
 ---
 
 *Fluir Ses Sistemi — JDA 6.5 + DAVE + LavaPlayer 2.2.7 (SoundCloud)*
-

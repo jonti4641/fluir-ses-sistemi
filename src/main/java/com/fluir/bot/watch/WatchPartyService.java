@@ -23,6 +23,7 @@ import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -37,6 +38,7 @@ public final class WatchPartyService {
     private static final Pattern WATCH_URL = Pattern.compile("(?:youtu\\.be/|youtube\\.com/(?:watch\\?(?:[^#]*&)?v=|shorts/|embed/))([A-Za-z0-9_-]{11})", Pattern.CASE_INSENSITIVE);
     private static final Pattern INSTANCE_ID = Pattern.compile("^[A-Za-z0-9_-]{10,200}$");
     private static final Pattern SNOWFLAKE = Pattern.compile("^[0-9]{15,22}$");
+    private static final Pattern GOOGLEVIDEO_SUBDOMAIN = Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,178}[A-Za-z0-9])?$");
     private static final Duration ROOM_TTL = Duration.ofHours(6);
     private static final Duration PENDING_TTL = Duration.ofMinutes(2);
     private static final int MAX_ROOMS = 1_000;
@@ -52,8 +54,7 @@ public final class WatchPartyService {
             <script>
             (()=>{
               const mappings=[
-                {prefix:"/youtube",target:"www.youtube.com"},
-                {prefix:"/googlevideo/{subdomain}",target:"{subdomain}.googlevideo.com"}
+                {prefix:"/youtube",target:"www.youtube.com"}
               ];
               window.DiscordEmbeddedAppSDK?.patchUrlMappings?.(mappings);
               const suffix=".googlevideo.com";
@@ -66,6 +67,13 @@ public final class WatchPartyService {
                   return location.origin+"/googlevideo/"+subdomain+url.pathname+url.search+url.hash;
                 }catch{return value}
               };
+              const mappedFetch=window.fetch.bind(window);
+              window.fetch=(input,init)=>{
+                if(input instanceof Request)return mappedFetch(new Request(remap(input.url),input),init);
+                return mappedFetch(remap(input),init);
+              };
+              const mappedXhrOpen=XMLHttpRequest.prototype.open;
+              XMLHttpRequest.prototype.open=function(method,url,...rest){return mappedXhrOpen.call(this,method,remap(url),...rest)};
               const patchSrc=prototype=>{
                 const descriptor=Object.getOwnPropertyDescriptor(prototype,"src");
                 if(!descriptor?.get||!descriptor?.set)return;
@@ -87,6 +95,8 @@ public final class WatchPartyService {
     private final String botToken;
     private final HttpClient discordApi;
     private final HttpClient youtubeAssets;
+    private final HttpClient googleVideo;
+    private final Semaphore googleVideoRelays = new Semaphore(24);
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
     private final Map<Long, PendingLaunch> pendingLaunches = new ConcurrentHashMap<>();
@@ -106,6 +116,7 @@ public final class WatchPartyService {
         this.botToken = botToken == null ? "" : botToken;
         this.discordApi = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
         this.youtubeAssets = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.googleVideo = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).followRedirects(HttpClient.Redirect.NEVER).build();
         this.htmlTemplate = loadTemplate();
         this.activityTemplate = loadTextResource("/activity.html");
         this.discordSdk = loadBytesResource("/discord-sdk.js");
@@ -117,9 +128,131 @@ public final class WatchPartyService {
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
         server.createContext("/youtube-embed/", this::handleYouTubeEmbed);
+        server.createContext("/googlevideo/", this::handleGoogleVideo);
         server.createContext("/s/", this::handleYouTubeAsset);
         server.createContext("/yts/", this::handleYouTubeAsset);
         server.createContext("/", this::handleActivityPage);
+    }
+
+    /**
+     * YouTube embed sayfasının ürettiği imzalı medya URL'sini aynı Railway çıkışı
+     * üzerinden aktarır. Hedef kullanıcı girdisi değildir: yalnızca doğrulanan bir
+     * googlevideo.com alt alan adı ve YouTube'un sabit medya yolları kabul edilir.
+     */
+    private void handleGoogleVideo(HttpExchange exchange) throws IOException {
+        String method = exchange.getRequestMethod();
+        if (!"GET".equals(method) && !"HEAD".equals(method)) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        URI target = googleVideoTarget(exchange.getRequestURI());
+        if (target == null) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_googlevideo_target\"}");
+            return;
+        }
+        if (!googleVideoRelays.tryAcquire()) {
+            sendJson(exchange, 503, "{\"error\":\"video_relay_busy\"}");
+            return;
+        }
+        try {
+            for (int redirects = 0; redirects <= 2; redirects++) {
+                HttpRequest.Builder builder = HttpRequest.newBuilder(target)
+                        .timeout(Duration.ofSeconds(25))
+                        .header("Accept", exchange.getRequestHeaders().getFirst("Accept") == null
+                                ? "*/*" : exchange.getRequestHeaders().getFirst("Accept"))
+                        .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0");
+                copyAllowedHeader(exchange, builder, "Range");
+                copyAllowedHeader(exchange, builder, "If-Range");
+                HttpResponse<InputStream> response = googleVideo.send(
+                        builder.method(method, HttpRequest.BodyPublishers.noBody()).build(),
+                        HttpResponse.BodyHandlers.ofInputStream());
+                if (response.statusCode() >= 300 && response.statusCode() < 400) {
+                    String location = response.headers().firstValue("Location").orElse("");
+                    response.body().close();
+                    URI redirected = safeGoogleVideoRedirect(target, location);
+                    if (redirected == null || redirects == 2) {
+                        sendJson(exchange, 502, "{\"error\":\"video_relay_redirect_rejected\"}");
+                        return;
+                    }
+                    target = redirected;
+                    continue;
+                }
+                relayGoogleVideoResponse(exchange, response, method);
+                return;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJson(exchange, 503, "{\"error\":\"video_relay_interrupted\"}");
+        } catch (IOException e) {
+            logger.warn("Googlevideo aktarımı başarısız: {}", e.getClass().getSimpleName());
+            if (exchange.getResponseCode() < 0) sendJson(exchange, 502, "{\"error\":\"video_relay_unavailable\"}");
+        } finally {
+            googleVideoRelays.release();
+        }
+    }
+
+    static URI googleVideoTarget(URI requestUri) {
+        if (requestUri == null) return null;
+        String rawPath = requestUri.getRawPath();
+        if (rawPath == null || !rawPath.startsWith("/googlevideo/") || rawPath.length() > 2_048 || rawPath.contains("..")) return null;
+        String remainder = rawPath.substring("/googlevideo/".length());
+        int slash = remainder.indexOf('/');
+        if (slash < 1) return null;
+        String subdomain = remainder.substring(0, slash);
+        String mediaPath = remainder.substring(slash);
+        if (!GOOGLEVIDEO_SUBDOMAIN.matcher(subdomain).matches()) return null;
+        if (!("/videoplayback".equals(mediaPath) || "/initplayback".equals(mediaPath) || "/generate_204".equals(mediaPath))) return null;
+        String query = requestUri.getRawQuery();
+        if (query != null && query.length() > 12_000) return null;
+        if ("/videoplayback".equals(mediaPath) && !looksLikeSignedVideoQuery(query)) return null;
+        try {
+            return new URI("https", subdomain + ".googlevideo.com", mediaPath, query, null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean looksLikeSignedVideoQuery(String query) {
+        if (query == null) return false;
+        String framed = "&" + query.toLowerCase() + "&";
+        return framed.contains("&expire=") && framed.contains("&id=")
+                && (framed.contains("&sig=") || framed.contains("&signature=") || framed.contains("&lsig="));
+    }
+
+    private static URI safeGoogleVideoRedirect(URI current, String location) {
+        try {
+            URI redirected = current.resolve(location);
+            String host = redirected.getHost();
+            if (!"https".equalsIgnoreCase(redirected.getScheme()) || host == null
+                    || !host.toLowerCase().endsWith(".googlevideo.com")) return null;
+            String prefix = host.substring(0, host.length() - ".googlevideo.com".length());
+            return GOOGLEVIDEO_SUBDOMAIN.matcher(prefix).matches() ? redirected : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void relayGoogleVideoResponse(HttpExchange exchange, HttpResponse<InputStream> response, String method) throws IOException {
+        int status = response.statusCode();
+        if (!(status == 200 || status == 206 || status == 204 || status == 304 || status == 416)) {
+            response.body().close();
+            sendJson(exchange, 502, "{\"error\":\"video_relay_upstream_rejected\"}");
+            return;
+        }
+        for (String name : new String[]{"Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"}) {
+            response.headers().firstValue(name).ifPresent(value -> exchange.getResponseHeaders().set(name, value));
+        }
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        long length = response.headers().firstValueAsLong("Content-Length").orElse(0);
+        if ("HEAD".equals(method) || status == 204 || status == 304) {
+            response.body().close();
+            exchange.sendResponseHeaders(status, -1);
+            return;
+        }
+        exchange.sendResponseHeaders(status, length > 0 ? length : 0);
+        try (InputStream input = response.body(); OutputStream output = exchange.getResponseBody()) {
+            input.transferTo(output);
+        }
     }
 
     /**
@@ -900,4 +1033,3 @@ public final class WatchPartyService {
         }
     }
 }
-

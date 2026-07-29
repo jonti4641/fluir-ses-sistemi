@@ -15,10 +15,26 @@ class ActivityLaunchServiceTest {
 
         assertFalse(normalized.contains("nonce=\"old\""));
         assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-2"));
-        assertTrue(normalized.contains("/googlevideo/{subdomain}"));
-        assertTrue(normalized.contains("{subdomain}.googlevideo.com"));
+        assertTrue(normalized.contains("location.origin+\"/googlevideo/\"+subdomain"));
+        assertTrue(normalized.contains("window.fetch=(input,init)"));
+        assertFalse(normalized.contains("target:\"{subdomain}.googlevideo.com\""));
         assertTrue(normalized.contains("patchUrlMappings"));
         assertFalse(normalized.contains("http://"));
+    }
+
+    @Test
+    void googleVideoRelayAcceptsOnlySignedFixedMediaTargets() {
+        assertNotNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/rr1---sn-example/videoplayback?expire=123&id=o-test&sig=abc")));
+        assertNotNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/test/generate_204")));
+
+        assertNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/rr1---sn-example/videoplayback?id=o-test")));
+        assertNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/evil.example/videoplayback?expire=123&id=o-test&sig=abc")));
+        assertNull(WatchPartyService.googleVideoTarget(java.net.URI.create(
+                "/googlevideo/test/../admin?expire=123&id=o-test&sig=abc")));
     }
 
     @Test
@@ -57,4 +73,3 @@ class ActivityLaunchServiceTest {
         assertTrue(request.bodyPublisher().orElseThrow().contentLength() > 80);
     }
 }
-
