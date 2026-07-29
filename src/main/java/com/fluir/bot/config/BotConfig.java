@@ -18,7 +18,13 @@ public record BotConfig(
     public static BotConfig load() {
         Dotenv dotenv = Dotenv.configure().ignoreIfMissing().ignoreIfMalformed().load();
         String token = value("DISCORD_TOKEN", dotenv, "");
-        Path dataDir = Path.of(value("DATA_DIR", dotenv, "data")).toAbsolutePath().normalize();
+        String configuredDataDir = value("DATA_DIR", dotenv, "").trim();
+        String railwayVolumePath = System.getenv("RAILWAY_VOLUME_MOUNT_PATH");
+        String selectedDataDir = !configuredDataDir.isBlank() ? configuredDataDir
+                : railwayVolumePath != null && !railwayVolumePath.isBlank()
+                ? Path.of(railwayVolumePath, "fluir-data").toString()
+                : "data";
+        Path dataDir = Path.of(selectedDataDir).toAbsolutePath().normalize();
         int port = boundedInt(value("PORT", dotenv, "8080"), 1, 65535, 8080);
         int maxQuery = boundedInt(value("MAX_QUERY_LENGTH", dotenv, "300"), 32, 1000, 300);
         String webhook = value("ERROR_WEBHOOK_URL", dotenv, "").trim();

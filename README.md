@@ -75,8 +75,8 @@ java -jar target/fluir-ses-sistemi-1.0.0.jar
 
 1. [Railway.app](https://railway.app) → **New Project**
 2. **Deploy from GitHub Repo** seç → bu repoyu bağla
-3. **Variables** → `DISCORD_TOKEN` = `your_token`, `DATA_DIR` = `/app/data` ekle
-4. Kalıcı veriler için Railway Volume oluşturup `/app/data` yoluna bağla
+3. **Variables** → `DISCORD_TOKEN` = `your_token` ekle
+4. Kalıcı veriler için Railway Volume bağla; bot `RAILWAY_VOLUME_MOUNT_PATH` yolunu otomatik kullanır (`DATA_DIR` ile geçersiz kılabilirsin)
 5. İstersen `ERROR_WEBHOOK_URL` ve uzun/rastgele bir `HEALTH_METRICS_TOKEN` tanımla
 6. Deploy otomatik başlar; Railway `/health` yanıtını bekler ✅
 
