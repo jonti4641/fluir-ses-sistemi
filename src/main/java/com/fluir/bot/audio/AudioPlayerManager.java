@@ -37,9 +37,12 @@ public class AudioPlayerManager {
     private void registerSources() {
         // 1. Birincil Kaynak: SoundCloud
         try {
-            playerManager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
+            playerManager.registerSourceManager(SoundCloudAudioSourceManager.builder()
+                    .withAllowSearch(true)
+                    .withFilterOutPreviewTracks(true)
+                    .build());
             logger.info("✅ SoundCloud birincil ses kaynağı olarak kayıt edildi.");
-            logger.info("ℹ️ SoundCloud Sağlık Durumu: [Search: AKTİF | Resolve: AKTİF]");
+            logger.info("ℹ️ SoundCloud Sağlık Durumu: [Search: AKTİF | Resolve: AKTİF | Preview Filter: AKTİF]");
         } catch (Exception e) {
             logger.error("❌ SoundCloud kaynağı başlatılamadı: {}", e.getMessage(), e);
         }
