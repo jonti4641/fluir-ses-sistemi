@@ -366,12 +366,33 @@ public final class WatchPartyService {
                 sendJson(exchange, 502, "{\"error\":\"youtube_asset_unavailable\"}");
                 return;
             }
-            exchange.getResponseHeaders().set("Content-Type", response.headers().firstValue("Content-Type").orElse("application/octet-stream"));
+            String contentType = response.headers().firstValue("Content-Type").orElse("application/octet-stream");
+            exchange.getResponseHeaders().set("Content-Type", contentType);
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
             exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
             if ("HEAD".equals(exchange.getRequestMethod())) {
                 response.body().close();
                 exchange.sendResponseHeaders(200, -1);
+                return;
+            }
+            if (contentType.toLowerCase().contains("javascript")) {
+                byte[] raw;
+                try (InputStream input = response.body()) {
+                    raw = input.readNBytes((int) MAX_YOUTUBE_ASSET_BYTES + 1);
+                }
+                if (raw.length > MAX_YOUTUBE_ASSET_BYTES) {
+                    sendJson(exchange, 502, "{\"error\":\"youtube_asset_unavailable\"}");
+                    return;
+                }
+                String script = new String(raw, StandardCharsets.UTF_8)
+                        .replace("`/youtubei/", "`/youtube/youtubei/")
+                        .replace("\"/youtubei/", "\"/youtube/youtubei/")
+                        .replace("'/youtubei/", "'/youtube/youtubei/");
+                byte[] normalized = script.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, normalized.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(normalized);
+                }
                 return;
             }
             exchange.sendResponseHeaders(200, declaredLength >= 0 ? declaredLength : 0);
