@@ -1,7 +1,7 @@
 # ==============================================
 # AŞAMA 1: BUILD - Maven ile derle (Debian tabanlı)
 # ==============================================
-FROM maven:3.9-eclipse-temurin-17 AS builder
+FROM maven:3.9-eclipse-temurin-25 AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN mvn package -DskipTests -B --no-transfer-progress
 # ==============================================
 # AŞAMA 2: RUNTIME - Debian tabanlı JRE (musl değil, glibc!)
 # ==============================================
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 
 # FFmpeg, Opus ve gerekli native kütüphaneler (glibc ile tam uyumlu)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -36,6 +36,7 @@ RUN mkdir -p logs
 
 # JVM ayarları: gc log yok, bellek sınırı, düzgün kapanma
 ENTRYPOINT ["java", \
+    "--enable-native-access=ALL-UNNAMED", \
     "-Xmx450m", \
     "-Xms128m", \
     "-XX:+UseG1GC", \
