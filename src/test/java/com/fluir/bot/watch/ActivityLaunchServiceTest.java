@@ -29,4 +29,18 @@ class ActivityLaunchServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> ActivityLaunchService.callbackRequest(123, "bad/token"));
     }
+
+    @Test
+    void entryPointCommandUsesDiscordManagedActivityLaunchEndpoint() {
+        HttpRequest request = ActivityLaunchService.entryPointRequest(
+                "123456789012345678", "abcdefghijklmnopqrstuvwxyz.1234567890");
+
+        assertEquals("POST", request.method());
+        assertEquals("https://discord.com/api/v10/applications/123456789012345678/commands",
+                request.uri().toString());
+        assertEquals("Bot abcdefghijklmnopqrstuvwxyz.1234567890",
+                request.headers().firstValue("Authorization").orElseThrow());
+        assertTrue(request.bodyPublisher().orElseThrow().contentLength() > 80);
+    }
 }
+

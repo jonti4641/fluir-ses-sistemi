@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
@@ -40,6 +41,7 @@ public final class WatchPartyService {
     private static final Duration PENDING_TTL = Duration.ofMinutes(2);
     private static final int MAX_ROOMS = 1_000;
     private static final int MAX_CONTROL_BODY = 2_048;
+    private static final String CONTROL_COOKIE = "__Host-FluirControl";
 
     private final String publicBaseUrl;
     private final String botToken;
@@ -112,7 +114,7 @@ public final class WatchPartyService {
         cleanupExpiredRooms();
         if (rooms.size() >= MAX_ROOMS) throw new IllegalStateException("Ortak izleme oda sınırına ulaşıldı.");
         String roomId = randomId();
-        Room room = new Room(roomId, videoId, ownerUserId);
+        Room room = new Room(roomId, videoId, randomId());
         rooms.put(roomId, room);
         return new WatchRoom(roomId, videoId, publicBaseUrl + "/watch/" + roomId, room.expiresAt);
     }
@@ -170,7 +172,7 @@ public final class WatchPartyService {
             sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
             return;
         }
-        if (!validOrigin(exchange) || !allowControl(exchange, "activity-bootstrap")) {
+        if (!validOrigin(exchange)) {
             sendJson(exchange, 429, "{\"error\":\"request_rejected\"}");
             return;
         }
@@ -186,6 +188,10 @@ public final class WatchPartyService {
             sendJson(exchange, 400, "{\"error\":\"invalid_activity_context\"}");
             return;
         }
+        if (!allowControl("activity-bootstrap:" + instanceId)) {
+            sendJson(exchange, 429, "{\"error\":\"request_rejected\"}");
+            return;
+        }
         long channelId;
         try {
             channelId = Long.parseUnsignedLong(channelValue);
@@ -197,29 +203,32 @@ public final class WatchPartyService {
             sendJson(exchange, 403, "{\"error\":\"activity_instance_rejected\"}");
             return;
         }
-        Room room = roomForActivity(instanceId, channelId);
-        if (room == null) {
-            sendJson(exchange, 409, "{\"error\":\"run_izle_in_this_channel\"}");
+        ActivityRoom activityRoom = roomForActivity(instanceId, channelId);
+        if (activityRoom == null) {
+            sendJson(exchange, 409, "{\"error\":\"room_limit_reached\"}");
             return;
         }
-        sendJson(exchange, 200, room.bootstrapSnapshot());
+        if (activityRoom.created()) setControllerCookie(exchange, activityRoom.room().controllerToken);
+        boolean controller = activityRoom.created() || activityRoom.room().hasControllerCookie(exchange);
+        sendJson(exchange, 200, activityRoom.room().bootstrapSnapshot(controller));
     }
 
-    private synchronized Room roomForActivity(String instanceId, long channelId) {
+    private synchronized ActivityRoom roomForActivity(String instanceId, long channelId) {
         cleanupExpiredRooms();
         String existingId = instanceRooms.get(instanceId);
         Room existing = existingId == null ? null : rooms.get(existingId);
-        if (existing != null && !existing.expired()) return existing;
+        if (existing != null && !existing.expired()) return new ActivityRoom(existing, false);
 
         PendingLaunch pending = pendingLaunches.get(channelId);
-        if (pending == null || pending.expired()) return null;
+        if (pending != null && pending.expired()) pending = null;
         if (rooms.size() >= MAX_ROOMS) return null;
         String roomId = randomId();
-        Room room = new Room(roomId, pending.videoId(), pending.ownerUserId());
+        String videoId = pending == null ? "" : pending.videoId();
+        Room room = new Room(roomId, videoId, randomId());
         rooms.put(roomId, room);
         instanceRooms.put(instanceId, roomId);
-        pendingLaunches.remove(channelId, pending);
-        return room;
+        if (pending != null) pendingLaunches.remove(channelId, pending);
+        return new ActivityRoom(room, true);
     }
 
     private boolean verifyActivityInstance(String instanceId, String channelId) {
@@ -295,8 +304,16 @@ public final class WatchPartyService {
             sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
             return;
         }
-        if (!validOrigin(exchange) || !allowControl(exchange, room.id)) {
+        if (!validOrigin(exchange)) {
             sendJson(exchange, 429, "{\"error\":\"request_rejected\"}");
+            return;
+        }
+        if (!room.hasControllerCookie(exchange)) {
+            sendJson(exchange, 403, "{\"error\":\"controller_only\"}");
+            return;
+        }
+        if (!allowControl("room-control:" + room.id)) {
+            sendJson(exchange, 429, "{\"error\":\"rate_limited\"}");
             return;
         }
         byte[] body = exchange.getRequestBody().readNBytes(MAX_CONTROL_BODY + 1);
@@ -306,6 +323,15 @@ public final class WatchPartyService {
         }
         Map<String, String> form = parseForm(new String(body, StandardCharsets.UTF_8));
         String action = form.getOrDefault("action", "");
+        if ("source".equals(action)) {
+            if (!room.setSource(form.getOrDefault("source", ""))) {
+                sendJson(exchange, 400, "{\"error\":\"invalid_youtube_source\"}");
+                return;
+            }
+            room.broadcast();
+            sendJson(exchange, 200, room.snapshot());
+            return;
+        }
         double position;
         try {
             position = Double.parseDouble(form.getOrDefault("position", "0"));
@@ -378,12 +404,17 @@ public final class WatchPartyService {
         }
     }
 
-    private boolean allowControl(HttpExchange exchange, String roomId) {
+    private boolean allowControl(String key) {
         long now = System.currentTimeMillis();
-        String key = exchange.getRemoteAddress().getAddress().getHostAddress() + ":" + roomId;
         RequestWindow window = requestWindows.compute(key, (ignored, old) ->
                 old == null || now - old.startedAt > 10_000 ? new RequestWindow(now, 1) : new RequestWindow(old.startedAt, old.count + 1));
         return window.count <= 30;
+    }
+
+    private static void setControllerCookie(HttpExchange exchange, String token) {
+        exchange.getResponseHeaders().add("Set-Cookie", CONTROL_COOKIE + "=" + token
+                + "; Path=/; Max-Age=" + ROOM_TTL.toSeconds()
+                + "; Secure; HttpOnly; SameSite=None; Partitioned");
     }
 
     private void cleanupExpiredRooms() {
@@ -451,8 +482,8 @@ public final class WatchPartyService {
                         + "style-src 'nonce-" + nonce + "'; img-src 'self' data: https://i.ytimg.com; "
                         + "frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self'; "
                         + "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com");
-        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
-        exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        exchange.getResponseHeaders().set("Referrer-Policy", "strict-origin-when-cross-origin");
+        exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=(), payment=(), usb=(), serial=(), bluetooth=(), accelerometer=(), gyroscope=(), magnetometer=(), clipboard-read=(), clipboard-write=(), fullscreen=(self)");
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
     }
@@ -463,8 +494,8 @@ public final class WatchPartyService {
                         + "img-src 'self' data: https://i.ytimg.com; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; "
                         + "connect-src 'self'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; "
                         + "frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com");
-        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
-        exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), fullscreen=(self)");
+        exchange.getResponseHeaders().set("Referrer-Policy", "strict-origin-when-cross-origin");
+        exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=(), payment=(), usb=(), serial=(), bluetooth=(), accelerometer=(), gyroscope=(), magnetometer=(), clipboard-read=(), clipboard-write=(), fullscreen=(self)");
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
     }
@@ -494,11 +525,12 @@ public final class WatchPartyService {
         private boolean expired() { return System.currentTimeMillis() >= expiresAt; }
     }
     private record RequestWindow(long startedAt, int count) {}
+    private record ActivityRoom(Room room, boolean created) {}
 
     private static final class Room {
         private final String id;
-        private final String videoId;
-        private final long ownerUserId;
+        private String videoId;
+        private final String controllerToken;
         private final long expiresAt = System.currentTimeMillis() + ROOM_TTL.toMillis();
         private final CopyOnWriteArrayList<ArrayBlockingQueue<String>> subscribers = new CopyOnWriteArrayList<>();
         private boolean playing = true;
@@ -506,10 +538,21 @@ public final class WatchPartyService {
         private long stateChangedAt = System.currentTimeMillis();
         private long version;
 
-        private Room(String id, String videoId, long ownerUserId) {
+        private Room(String id, String videoId, String controllerToken) {
             this.id = id;
             this.videoId = videoId;
-            this.ownerUserId = ownerUserId;
+            this.controllerToken = controllerToken;
+        }
+
+        private synchronized boolean setSource(String rawSource) {
+            String parsedVideoId = extractYouTubeId(rawSource);
+            if (parsedVideoId == null) return false;
+            videoId = parsedVideoId;
+            position = 0;
+            playing = true;
+            stateChangedAt = System.currentTimeMillis();
+            version++;
+            return true;
         }
 
         private synchronized boolean control(String action, double requestedPosition) {
@@ -528,11 +571,24 @@ public final class WatchPartyService {
             return "{\"videoId\":\"" + videoId + "\",\"playing\":" + playing
                     + ",\"position\":" + String.format(java.util.Locale.ROOT, "%.3f", current)
                     + ",\"serverTime\":" + now + ",\"version\":" + version
-                    + ",\"participants\":" + subscribers.size() + ",\"owner\":\"" + ownerUserId + "\"}";
+                    + ",\"participants\":" + subscribers.size() + "}";
         }
 
-        private synchronized String bootstrapSnapshot() {
-            return "{\"roomId\":\"" + id + "\"," + snapshot().substring(1);
+        private synchronized String bootstrapSnapshot(boolean controller) {
+            return "{\"roomId\":\"" + id + "\",\"controller\":" + controller + "," + snapshot().substring(1);
+        }
+
+        private boolean hasControllerCookie(HttpExchange exchange) {
+            String cookie = exchange.getRequestHeaders().getFirst("Cookie");
+            if (cookie == null || cookie.isBlank()) return false;
+            for (String pair : cookie.split(";")) {
+                String[] parts = pair.strip().split("=", 2);
+                if (parts.length == 2 && CONTROL_COOKIE.equals(parts[0])) {
+                    return MessageDigest.isEqual(controllerToken.getBytes(StandardCharsets.UTF_8),
+                            parts[1].getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            return false;
         }
 
         private void broadcast() {

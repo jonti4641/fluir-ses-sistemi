@@ -56,7 +56,7 @@ public class CommandManager extends ListenerAdapter {
         this.audioPlayerManager = audioPlayerManager;
     }
 
-    public static void registerSlashCommands(JDA jda) {
+    public static void registerSlashCommands(JDA jda, String botToken) {
         List<SlashCommandData> commands = new ArrayList<>();
         commands.add(Commands.slash("çal", "SoundCloud veya Spotify metadata ile müzik çalar")
                 .addOption(OptionType.STRING, "sorgu", "Şarkı adı veya SoundCloud / Spotify URL'si", true));
@@ -85,7 +85,14 @@ public class CommandManager extends ListenerAdapter {
                 .addSubcommands(new SubcommandData("goster","Ayarları gösterir"),new SubcommandData("ses","Varsayılan ses").addOption(OptionType.INTEGER,"deger","0-150",true),new SubcommandData("bos-kalma","Ayrılma süresi").addOption(OptionType.INTEGER,"saniye","30-900",true),new SubcommandData("max-kuyruk","Kuyruk sınırı").addOption(OptionType.INTEGER,"deger","10-500",true),new SubcommandData("otomatik-cal","Otomatik çalma").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("duyurular","Çalıyor duyuruları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("prefix","Prefix komutları").addOption(OptionType.BOOLEAN,"aktif","Aç/kapat",true),new SubcommandData("dj-rol","DJ rolü").addOption(OptionType.ROLE,"rol","Kontrol yetkili rol",true),new SubcommandData("dj-rol-sil","DJ rolü sınırlamasını kaldırır"),new SubcommandData("komut-kanal","Komut kanalı").addOption(OptionType.CHANNEL,"kanal","İzin verilen kanal",true),new SubcommandData("komut-kanal-sil","Komut kanalı sınırlamasını kaldırır")));
 
         jda.updateCommands().addCommands(commands).queue(
-                ok -> logger.info("✅ {} slash komutu kaydedildi.", commands.size()),
+                ok -> {
+                    logger.info("✅ {} slash komutu kaydedildi.", commands.size());
+                    new ActivityLaunchService().ensureEntryPoint(jda.getSelfUser().getId(), botToken)
+                            .thenAccept(success -> {
+                                if (success) logger.info("✅ Watch Together Etkinlikler rafı giriş noktası kaydedildi.");
+                                else logger.warn("⚠️ Watch Together Etkinlikler rafı giriş noktası kaydedilemedi.");
+                            });
+                },
                 err -> logger.error("❌ Slash komutları kaydedilemedi: {}", err.getMessage())
         );
     }
@@ -657,3 +664,4 @@ public class CommandManager extends ListenerAdapter {
                 .setFooter("Fluir Ses Sistemi | JDA 6.5 + DAVE + LavaPlayer 2.2.7");
     }
 }
+

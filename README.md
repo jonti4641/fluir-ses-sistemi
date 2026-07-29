@@ -94,10 +94,14 @@ başka bir HTTPS alan adı kullanılabilir.
    - `/youtube` → `www.youtube.com`
    - `/` → Railway alan adı (yalnızca alan adı; `https://` ekleme)
 4. Desktop ve Mobile destek platformlarını etkinleştir. Test hesabında Discord Developer Mode açık olmalı.
-5. Ses kanalına katıl, o ses kanalının yazılı sohbetinde `/izle youtube:<bağlantı>` çalıştır.
+5. Bot başlangıçta `watch together` birincil giriş komutunu oluşturur; Activity ses kanalındaki **Etkinlikler** rafından doğrudan açılabilir.
+6. Raf içinden açıldığında oda sahibi ekrandaki alana YouTube bağlantısını girer. Alternatif olarak ses kanalının yazılı sohbetinde `/izle youtube:<bağlantı>` çalıştırılabilir.
 
 Activity oturumu backend tarafından Discord'un Activity Instance API'siyle doğrulanır. Oda isteği
 iki dakika içinde Activity tarafından alınmazsa iptal edilir; oda ve kontrol istekleri oran sınırlıdır.
+Oynatma kontrolleri yalnızca odayı ilk açan tarayıcıya verilen `Secure`, `HttpOnly`, bölümlenmiş
+yetki çereziyle çalışır. Uygulama kamera, mikrofon, konum, ekran yakalama veya pano izni istemez ve
+oran sınırlama için istemci IP adresini okumaz.
 
 ---
 
@@ -141,9 +145,11 @@ fluir-ses-sistemi/
 - Railway'de token'ı **Variables** kısmından ayarla
 - Token/webhook değerlerini loglara, komutlara veya repoya yazma; bot hata webhook'unda bunları taşımaz.
 - Genel HTTP URL ve yerel dosya oynatma güvenlik nedeniyle kapalıdır; yalnızca desteklenen HTTPS medya alan adları kabul edilir.
-- **YouTube bağlantıları desteklenmez.** YouTube bağlantıları bot tarafından reddedilir.
+- **Müzik komutlarında YouTube desteklenmez.** YouTube yalnızca Discord içindeki Watch Together Activity'sinde, yerleştirmeye izin veren videolar için kullanılır.
+- Netflix, Prime Video ve üçüncü taraf film sitelerinin DRM/oturum korumasını aşan bağlantılar çıkarılmaz veya yeniden yayınlanmaz.
 - **Spotify Desteği:** Spotify bağlantıları yalnızca metadata (sanatçı + parça adı) çözümlemesidir; ses SoundCloud (`scsearch:`) üzerinden iletilir.
 
 ---
 
 *Fluir Ses Sistemi — JDA 6.5 + DAVE + LavaPlayer 2.2.7 (SoundCloud)*
+

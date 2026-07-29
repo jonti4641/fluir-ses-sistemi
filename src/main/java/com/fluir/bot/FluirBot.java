@@ -51,7 +51,7 @@ public class FluirBot {
                     .addEventListeners(commands,new VoiceUpdateListener(audioPlayerManager)).build().awaitReady();
             audioPlayerManager.getWatchPartyService().configureApplication(jda.getSelfUser().getId());
             healthServer=new HealthServer(config.port(),store,()->jda,audioPlayerManager,config.healthMetricsToken());
-            CommandManager.registerSlashCommands(jda);
+            CommandManager.registerSlashCommands(jda, config.discordToken());
             registerShutdownHook();
             logger.info("Fluir hazır: {} sunucu, health port {}",jda.getGuilds().size(),config.port());
         }catch(Throwable e){String id=notifier.report(0,"startup",e);logger.error("Bot başlatılamadı. Incident={}",id,e);shutdown();System.exit(1);}
@@ -64,3 +64,4 @@ public class FluirBot {
     private static void registerShutdownHook(){Runtime.getRuntime().addShutdownHook(new Thread(FluirBot::shutdown,"FluirBot-ShutdownHook"));}
     static void shutdown(){try{if(healthServer!=null)healthServer.close();if(audioPlayerManager!=null)audioPlayerManager.shutdown();if(jda!=null)jda.shutdown();if(store!=null)store.close();logger.info("Kontrollü shutdown tamamlandı.");}catch(Exception e){logger.error("Shutdown hatası",e);}}
 }
+

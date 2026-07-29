@@ -6,114 +6,123 @@
   <meta name="color-scheme" content="dark">
   <title>Fluir Watch Together</title>
   <style nonce="__NONCE__">
-    :root{--bg:#070914;--panel:#101526;--line:#283150;--cyan:#18e2d0;--blue:#6676ff;--pink:#ff4d91;--text:#f7f8ff;--muted:#9ba8ca;--danger:#ff86aa}
-    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 15% 0,#172758 0,transparent 38%),radial-gradient(circle at 100% 15%,#3b173f 0,transparent 34%),var(--bg);color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,sans-serif}
-    button{font:inherit}.shell{width:min(1220px,100%);margin:auto;padding:clamp(12px,3vw,28px)}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px}.brand{display:flex;align-items:center;gap:13px}.logo{width:50px;height:50px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(135deg,var(--cyan),var(--blue));box-shadow:0 0 38px #18e2d055;font-size:25px}.brand h1{margin:0;font-size:21px}.brand p{margin:2px 0 0;color:var(--muted)}.live{padding:8px 13px;border:1px solid #ff4d9166;border-radius:999px;background:#ff4d9118;color:#ff9abd;font-weight:900;white-space:nowrap}
-    .grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px}.card{overflow:hidden;border:1px solid var(--line);border-radius:20px;background:#101526e8;box-shadow:0 20px 80px #0008}.video{position:relative;aspect-ratio:16/9;background:#03040a}.video iframe{width:100%;height:100%;border:0}.loading{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;background:linear-gradient(135deg,#0a1021,#111934);z-index:2}.loading.hidden{display:none}.spinner{width:44px;height:44px;margin:0 auto 13px;border:4px solid #ffffff22;border-top-color:var(--cyan);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-    .details{padding:18px}.titleline{display:flex;justify-content:space-between;gap:20px}.titleline h2{margin:0;font-size:18px}.sub{margin-top:3px;color:var(--muted);font-size:13px}.sync{color:var(--cyan);font-weight:900;white-space:nowrap}.timeline{margin-top:19px}.bar{position:relative;height:10px;overflow:hidden;border-radius:999px;background:#252d47}.fill{width:0;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));box-shadow:0 0 20px var(--cyan);transition:width .3s linear}.times{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:7px;color:#ced6ef;font-variant-numeric:tabular-nums}.times span:nth-child(2){text-align:center}.times span:last-child{text-align:right}
-    .controls{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-top:16px}.controls button{min-height:46px;padding:9px;border:1px solid #34405f;border-radius:13px;background:#19223b;color:#fff;font-weight:850;cursor:pointer;transition:.16s}.controls button:hover{border-color:var(--cyan);transform:translateY(-1px)}.controls button:active{transform:none}.controls .main{border:0;background:linear-gradient(135deg,var(--blue),#8b58ff)}
-    aside{display:grid;align-content:start;gap:18px}.panel{padding:18px}.panel h3{margin:0 0 14px}.stat{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line)}.stat:last-child{border:0}.dot{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 13px var(--cyan)}.tip{padding:13px;border-radius:12px;background:#0b1020;color:var(--muted);font-size:13px}.danger{color:var(--danger)}.error{color:var(--danger);font-weight:800}
-    @media(max-width:850px){.grid{grid-template-columns:1fr}aside{grid-template-columns:1fr 1fr}.controls{grid-template-columns:repeat(3,1fr)}}@media(max-width:540px){.shell{padding:10px}.brand p{display:none}.live{font-size:12px}.controls{grid-template-columns:repeat(2,1fr)}aside{grid-template-columns:1fr}.titleline{display:block}.sync{display:block;margin-top:8px}}
+    :root{--cyan:#20e6d1;--blue:#7180ff;--pink:#ff4d91;--text:#f8f9ff;--muted:#aab3ca;--danger:#ff8fab}
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#000;color:var(--text);font:14px/1.35 Inter,ui-sans-serif,system-ui,sans-serif}
+    button,input,select{font:inherit}.stage{position:relative;width:100%;height:100%;background:#000;isolation:isolate}.player,.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}.player.viewer iframe{pointer-events:none}
+    .loading{position:absolute;inset:0;z-index:4;display:grid;place-items:center;padding:24px;text-align:center;background:#050609}.loading.hidden{display:none}.spinner{width:44px;height:44px;margin:0 auto 14px;border:4px solid #ffffff20;border-top-color:var(--cyan);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.muted{margin-top:7px;color:var(--muted)}.error{color:var(--danger)}
+    .source-card{width:min(560px,calc(100vw - 32px));padding:24px;border:1px solid #ffffff22;border-radius:18px;background:#0b0e16eF;box-shadow:0 30px 100px #000}.source-card h1{margin:0 0 8px;font-size:21px}.source-card p{margin:0 0 17px;color:var(--muted)}.source-row{display:flex;gap:9px}.source-row input{min-width:0;flex:1;padding:13px 14px;border:1px solid #35405d;border-radius:11px;outline:0;background:#151b2b;color:#fff}.source-row input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #20e6d11c}.source-row button{border:0;border-radius:11px;padding:0 18px;background:linear-gradient(135deg,var(--blue),#9868ff);color:#fff;font-weight:850;cursor:pointer}.source-error{min-height:19px;margin-top:9px;color:var(--danger)}
+    .chrome{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none;background:linear-gradient(180deg,#0009 0,transparent 23%,transparent 65%,#000e 100%);opacity:0;transition:opacity .2s ease}.stage:hover .chrome,.stage.controls-visible .chrome,.chrome:focus-within{opacity:1}.topbar,.controls{pointer-events:auto}.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:max(15px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 12px max(18px,env(safe-area-inset-left))}.brand{font-size:15px;font-weight:900;letter-spacing:.02em}.role{padding:7px 10px;border:1px solid #ffffff24;border-radius:999px;background:#080a10a8;color:var(--muted);font-size:12px}.role.host{border-color:#20e6d155;color:var(--cyan)}
+    .controls{padding:18px max(20px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left))}.timeline{display:grid;grid-template-columns:auto minmax(80px,1fr) auto;align-items:center;gap:12px;font-variant-numeric:tabular-nums}.timeline input{width:100%;height:5px;margin:0;accent-color:var(--pink);cursor:pointer}.timeline input:disabled{cursor:default}.control-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:12px}.cluster{display:flex;align-items:center;gap:8px}.icon{min-width:42px;height:42px;border:1px solid #ffffff24;border-radius:11px;background:#171a24d9;color:#fff;font-weight:850;cursor:pointer}.icon:hover{border-color:#fff}.icon:disabled{opacity:.38;cursor:not-allowed}.primary{min-width:54px;border:0;background:#fff;color:#08090d;font-size:17px}.caption{height:42px;border:1px solid #ffffff24;border-radius:11px;padding:0 10px;background:#171a24;color:#fff;cursor:pointer}.status{max-width:42vw;overflow:hidden;color:var(--muted);white-space:nowrap;text-overflow:ellipsis}.viewer-note{display:none;color:var(--muted);font-size:12px}.viewer-mode .host-control{display:none}.viewer-mode .viewer-note{display:block}
+    @media(max-width:620px){.topbar{padding:12px}.controls{padding:12px}.status{display:none}.icon{min-width:38px;height:38px}.source-row{flex-direction:column}.source-row button{height:44px}.caption{max-width:110px}.timeline{gap:8px}}
   </style>
 </head>
 <body>
-<main class="shell">
-  <header class="top">
-    <div class="brand"><div class="logo">◉</div><div><h1>Fluir Watch Together</h1><p>Discord Activity • senkron YouTube odası</p></div></div>
-    <div class="live">● VOICE ACTIVITY</div>
-  </header>
-  <section class="grid">
-    <article class="card">
-      <div class="video"><div id="loading" class="loading"><div><div class="spinner"></div><strong id="loadingTitle">Discord oturumu doğrulanıyor…</strong><div id="loadingDetail" class="sub">Bu ekran yalnızca Discord içinden çalışır.</div></div></div><div id="player"></div></div>
-      <div class="details">
-        <div class="titleline"><div><h2 id="videoTitle">Video hazırlanıyor…</h2><div class="sub">Kontroller aynı Activity oturumundaki herkeste eşitlenir.</div></div><span id="syncText" class="sync">Bağlanıyor</span></div>
-        <div class="timeline"><div class="bar"><div id="fill" class="fill"></div></div><div class="times"><span id="current">00:00</span><span id="remaining">-00:00</span><span id="duration">00:00</span></div></div>
-        <div class="controls"><button data-seek="-10">⏪ 10 sn</button><button id="play" class="main">▶ Oynat</button><button id="pause">⏸ Duraklat</button><button data-seek="10">10 sn ⏩</button><button id="sync">↻ Eşitle</button></div>
+<main id="stage" class="stage controls-visible">
+  <div id="player" class="player viewer"></div>
+  <section id="loading" class="loading"><div><div class="spinner"></div><strong id="loadingTitle">Discord oturumu doğrulanıyor…</strong><div id="loadingDetail" class="muted">Fluir kamera, mikrofon veya konum izni istemez.</div></div></section>
+  <section id="sourceGate" class="loading hidden">
+    <form id="sourceForm" class="source-card" autocomplete="off">
+      <h1 id="sourceTitle">Yayını başlat</h1>
+      <p id="sourceHint">Yalnızca yerleştirmeye izin veren bir YouTube video bağlantısı kullan.</p>
+      <div id="sourceFields" class="source-row"><input id="sourceUrl" type="url" inputmode="url" maxlength="500" required placeholder="https://www.youtube.com/watch?v=…" aria-label="YouTube video bağlantısı"><button type="submit">Videoyu aç</button></div>
+      <div id="sourceError" class="source-error" role="alert"></div>
+    </form>
+  </section>
+  <section id="chrome" class="chrome viewer-mode">
+    <header class="topbar"><div class="brand">FLUIR · WATCH TOGETHER</div><div id="role" class="role">İzleyici</div></header>
+    <footer class="controls">
+      <div class="timeline"><span id="current">00:00</span><input id="seek" type="range" min="0" max="100" value="0" step="0.1" disabled aria-label="Video konumu"><span id="duration">00:00</span></div>
+      <div class="control-row">
+        <div class="cluster">
+          <button id="back" class="icon host-control" type="button" title="10 saniye geri">−10</button>
+          <button id="play" class="icon primary host-control" type="button" title="Oynat veya duraklat">▶</button>
+          <button id="forward" class="icon host-control" type="button" title="10 saniye ileri">+10</button>
+          <span class="viewer-note">Yayını yalnızca oda sahibi yönetebilir.</span>
+        </div>
+        <div id="status" class="status">Bağlanıyor…</div>
+        <div class="cluster">
+          <select id="captions" class="caption" aria-label="Altyazı dili"><option value="off">Altyazı kapalı</option><option value="tr">Türkçe altyazı</option><option value="en">English captions</option></select>
+          <button id="mute" class="icon" type="button" title="Sesi aç veya kapat">🔊</button>
+          <button id="fullscreen" class="icon" type="button" title="Tam ekran">⛶</button>
+        </div>
       </div>
-    </article>
-    <aside>
-      <section class="card panel"><h3>Canlı Oda</h3><div class="stat"><span><i class="dot"></i>Katılımcılar</span><strong id="participants">0</strong></div><div class="stat"><span>Senkron farkı</span><strong id="drift">0.0 sn</strong></div><div class="stat"><span>Bağlantı</span><strong id="connection">Kuruluyor</strong></div><div class="stat"><span>Oda kimliği</span><strong id="room">—</strong></div></section>
-      <section class="card panel"><h3>Nasıl Çalışır?</h3><p class="tip">Discord bu ekranı ses kanalının içinde açar. Video resmî YouTube gömülü oynatıcısından gelir; Fluir yalnızca oynatma zamanını ve kontrol durumunu eşitler.</p><p class="tip danger">Activity açılmazsa `/izle` komutunu bulunduğun ses kanalının yazılı sohbetinde yeniden çalıştır.</p></section>
-    </aside>
+    </footer>
   </section>
 </main>
 <script src="/assets/discord-sdk.js"></script>
 <script nonce="__NONCE__">
-  const clientId="__DISCORD_CLIENT_ID__";
-  const byId=id=>document.getElementById(id);
-  const PLAYING=1,PAUSED=2;
-  let discordSdk,roomId,videoId,playerFrame,playerReady=false,playerState=-1,playerCurrent=0,playerDuration=0,lastRemote=null,applying=false,events;
-  const clock=value=>{value=Math.max(0,Math.floor(value||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h>0?[h,m,s].map((n,i)=>i?String(n).padStart(2,"0"):n).join(":"):[m,s].map(n=>String(n).padStart(2,"0")).join(":")};
-  const fail=(title,detail)=>{byId("loadingTitle").textContent=title;byId("loadingDetail").textContent=detail;byId("loadingDetail").classList.add("error");byId("connection").textContent="Hata";byId("syncText").textContent="Bağlanamadı"};
+  const clientId="__DISCORD_CLIENT_ID__",byId=id=>document.getElementById(id),PLAYING=1,PAUSED=2;
+  let discordSdk,roomId,videoId="",playerFrame,playerReady=false,playerState=-1,playerCurrent=0,playerDuration=0,lastRemote,events,controller=false,applying=false,muted=false,hideTimer,seeking=false;
+  const clock=value=>{value=Math.max(0,Math.floor(value||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h?[h,m,s].map((n,i)=>i?String(n).padStart(2,"0"):n).join(":"):[m,s].map(n=>String(n).padStart(2,"0")).join(":")};
+  const showControls=()=>{byId("stage").classList.add("controls-visible");clearTimeout(hideTimer);hideTimer=setTimeout(()=>byId("stage").classList.remove("controls-visible"),2800)};
+  const fail=(title,detail)=>{byId("loading").classList.remove("hidden");byId("loadingTitle").textContent=title;byId("loadingDetail").textContent=detail;byId("loadingDetail").classList.add("error");byId("status").textContent="Bağlantı hatası"};
   async function boot(){
     try{
-      if(!window.DiscordEmbeddedAppSDK?.DiscordSDK)throw new Error("SDK yüklenemedi");
+      if(!window.DiscordEmbeddedAppSDK?.DiscordSDK)throw new Error("Discord SDK yüklenemedi");
       discordSdk=new window.DiscordEmbeddedAppSDK.DiscordSDK(clientId);
-      await Promise.race([discordSdk.ready(),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Discord zaman aşımı")),8000))]);
+      await Promise.race([discordSdk.ready(),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Discord zaman aşımı")),9000))]);
       const instanceId=discordSdk.instanceId,channelId=discordSdk.channelId;
       if(!instanceId||!channelId)throw new Error("Activity bağlamı bulunamadı");
       const data=await bootstrapActivity(instanceId,channelId);
-      roomId=data.roomId;videoId=data.videoId;byId("room").textContent=roomId.slice(0,8);connectEvents();maybeCreatePlayer();
+      roomId=data.roomId;controller=Boolean(data.controller);applyRole();connectEvents();apply(data);
     }catch(error){fail("Activity başlatılamadı",error.message||"Bilinmeyen hata")}
   }
   async function bootstrapActivity(instanceId,channelId){
     for(let attempt=1;attempt<=6;attempt++){
-      const response=await fetch("/api/activity/bootstrap",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"instanceId="+encodeURIComponent(instanceId)+"&channelId="+encodeURIComponent(channelId)});
-      const data=await response.json();
-      if(response.ok)return data;
-      if(response.status===409)throw new Error("Bu kanalda bekleyen /izle isteği yok");
+      const response=await fetch("/api/activity/bootstrap",{method:"POST",credentials:"include",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"instanceId="+encodeURIComponent(instanceId)+"&channelId="+encodeURIComponent(channelId)});
+      const data=await response.json();if(response.ok)return data;
       if(response.status!==403||attempt===6)throw new Error("Oturum doğrulanamadı ("+response.status+")");
-      byId("loadingDetail").textContent="Discord video oturumu hazırlanıyor… ("+attempt+"/6)";
-      await new Promise(resolve=>setTimeout(resolve,700));
+      byId("loadingDetail").textContent="Discord video odası hazırlanıyor… ("+attempt+"/6)";await new Promise(resolve=>setTimeout(resolve,700));
     }
   }
-  function maybeCreatePlayer(){
-    if(!videoId||playerFrame)return;
-    playerFrame=document.createElement("iframe");
-    playerFrame.id="youtube-player";
-    playerFrame.title="YouTube video oynatıcı";
-    playerFrame.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";
-    playerFrame.allowFullscreen=true;
-    playerFrame.loading="eager";
-    playerFrame.referrerPolicy="strict-origin-when-cross-origin";
-    playerFrame.src="/youtube/embed/"+encodeURIComponent(videoId)+"?enablejsapi=1&autoplay=1&playsinline=1&rel=0&controls=1&fs=1&origin="+encodeURIComponent(location.origin);
-    playerFrame.onload=()=>{
-      playerReady=true;
-      byId("loading").classList.add("hidden");
-      byId("videoTitle").textContent="YouTube videosu";
-      announceListener();setTimeout(announceListener,350);setTimeout(announceListener,1000);setTimeout(announceListener,2200);
-      fetchState();
-    };
+  function applyRole(){
+    byId("chrome").classList.toggle("viewer-mode",!controller);byId("player").classList.toggle("viewer",!controller);byId("seek").disabled=!controller;
+    byId("role").textContent=controller?"Yayın sahibi":"İzleyici";byId("role").classList.toggle("host",controller);
+  }
+  function showSourceGate(){
+    byId("loading").classList.add("hidden");byId("sourceGate").classList.remove("hidden");
+    byId("sourceFields").style.display=controller?"flex":"none";byId("sourceTitle").textContent=controller?"Yayını başlat":"Yayın bekleniyor";
+    byId("sourceHint").textContent=controller?"Yerleştirmeye izin veren YouTube bağlantısını gir.":"Oda sahibi videoyu seçtiğinde yayın otomatik başlayacak.";
+    if(controller)setTimeout(()=>byId("sourceUrl").focus(),60);
+  }
+  function createPlayer(id){
+    videoId=id;playerReady=false;playerState=-1;playerCurrent=0;playerDuration=0;byId("sourceGate").classList.add("hidden");
+    byId("loading").classList.remove("hidden");byId("loadingTitle").textContent="Video açılıyor…";byId("loadingDetail").textContent="YouTube güvenli Discord proxy’si üzerinden yükleniyor.";byId("loadingDetail").classList.remove("error");
+    byId("player").replaceChildren();playerFrame=document.createElement("iframe");playerFrame.id="youtube-player";playerFrame.title="Fluir video yayını";
+    playerFrame.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";playerFrame.allowFullscreen=true;playerFrame.loading="eager";playerFrame.referrerPolicy="strict-origin-when-cross-origin";
+    const origin=location.origin,params=new URLSearchParams({enablejsapi:"1",autoplay:"1",playsinline:"1",rel:"0",controls:"0",disablekb:"1",fs:"0",origin,widget_referrer:origin});
+    playerFrame.src="/youtube/embed/"+encodeURIComponent(id)+"?"+params;
+    playerFrame.onload=()=>{playerReady=true;byId("loading").classList.add("hidden");announceListener();setTimeout(announceListener,400);setTimeout(announceListener,1200);fetchState();showControls()};
     byId("player").appendChild(playerFrame);
   }
   function playerCommand(func,args=[]){if(playerFrame?.contentWindow)playerFrame.contentWindow.postMessage(JSON.stringify({event:"command",func,args,id:"youtube-player"}),"*")}
-  function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),"*");playerCommand("addEventListener",["onReady"]);playerCommand("addEventListener",["onStateChange"]);playerCommand("addEventListener",["onError"])}
+  function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),"*");["onReady","onStateChange","onError","onApiChange"].forEach(name=>playerCommand("addEventListener",[name]))}
   window.addEventListener("message",event=>{
-    if(!playerFrame||event.source!==playerFrame.contentWindow)return;
-    let message;try{message=typeof event.data==="string"?JSON.parse(event.data):event.data}catch{return}
-    if(!message||typeof message!=="object")return;
+    if(!playerFrame||event.source!==playerFrame.contentWindow)return;let message;try{message=typeof event.data==="string"?JSON.parse(event.data):event.data}catch{return}if(!message||typeof message!=="object")return;
     if(message.event==="onReady"){playerReady=true;byId("loading").classList.add("hidden");fetchState();return}
-    if(message.event==="onError"){fail("YouTube videosu açılamadı","Oynatıcı hata kodu: "+message.info);return}
-    if(message.event==="onStateChange"){
-      playerState=Number(message.info);
-      if(!applying&&playerState===PLAYING)send("play",playerCurrent);
-      if(!applying&&playerState===PAUSED)send("pause",playerCurrent);
-      return;
-    }
-    if(message.event==="infoDelivery"&&message.info){
-      if(Number.isFinite(message.info.currentTime))playerCurrent=message.info.currentTime;
-      if(Number.isFinite(message.info.duration))playerDuration=message.info.duration;
-      if(message.info.playerState!==undefined)playerState=Number(message.info.playerState);
-      const title=message.info.videoData?.title;if(title)byId("videoTitle").textContent=title;
-    }
+    if(message.event==="onError"){const code=Number(message.info),detail=code===101||code===150?"Video sahibi başka sitelerde oynatmaya izin vermiyor.":code===153?"YouTube oynatıcı kimliği doğrulanamadı; başka bir video dene.":"YouTube hata kodu: "+code;fail("Video açılamadı",detail);return}
+    if(message.event==="onStateChange"){playerState=Number(message.info);byId("play").textContent=playerState===PLAYING?"❚❚":"▶";if(controller&&!applying){if(playerState===PLAYING)sendControl("play",playerCurrent);if(playerState===PAUSED)sendControl("pause",playerCurrent)}return}
+    if(message.event==="infoDelivery"&&message.info){if(Number.isFinite(message.info.currentTime))playerCurrent=message.info.currentTime;if(Number.isFinite(message.info.duration))playerDuration=message.info.duration;if(message.info.playerState!==undefined)playerState=Number(message.info.playerState)}
   });
-  function connectEvents(){events=new EventSource("/api/watch/"+roomId+"/events");events.addEventListener("state",event=>apply(JSON.parse(event.data)));events.onopen=()=>byId("connection").textContent="Bağlı";events.onerror=()=>byId("connection").textContent="Yeniden bağlanıyor"}
+  function connectEvents(){events=new EventSource("/api/watch/"+roomId+"/events");events.addEventListener("state",event=>apply(JSON.parse(event.data)));events.onopen=()=>byId("status").textContent="Canlı · güvenli bağlantı";events.onerror=()=>byId("status").textContent="Yeniden bağlanıyor…"}
   function expected(state){return state.position+(state.playing?(Date.now()-state.serverTime)/1000:0)}
-  function apply(state){lastRemote=state;byId("participants").textContent=state.participants;if(!playerReady)return;const target=expected(state),diff=target-playerCurrent;byId("drift").textContent=Math.abs(diff).toFixed(1)+" sn";applying=true;if(Math.abs(diff)>1.25)playerCommand("seekTo",[target,true]);if(state.playing&&playerState!==PLAYING)playerCommand("playVideo");if(!state.playing&&playerState===PLAYING)playerCommand("pauseVideo");setTimeout(()=>applying=false,700);byId("syncText").textContent=Math.abs(diff)<1.25?"✓ Senkron":"↻ Eşitlendi"}
-  function send(action,position){if(!roomId)return Promise.resolve();return fetch("/api/watch/"+roomId+"/control",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"action="+encodeURIComponent(action)+"&position="+encodeURIComponent(position)}).then(r=>{if(!r.ok)throw new Error()}).catch(()=>byId("syncText").textContent="Kontrol gönderilemedi")}
-  function fetchState(){fetch("/api/watch/"+roomId+"/state").then(r=>r.json()).then(apply)}
-  byId("play").onclick=()=>playerReady&&send("play",playerCurrent);byId("pause").onclick=()=>playerReady&&send("pause",playerCurrent);byId("sync").onclick=()=>lastRemote&&apply(lastRemote);document.querySelectorAll("[data-seek]").forEach(button=>button.onclick=()=>{if(!playerReady)return;const position=Math.max(0,playerCurrent+Number(button.dataset.seek));playerCommand("seekTo",[position,true]);send("seek",position)});
-  setInterval(()=>{if(!playerReady)return;byId("current").textContent=clock(playerCurrent);byId("duration").textContent=clock(playerDuration);byId("remaining").textContent="-"+clock(Math.max(0,playerDuration-playerCurrent));byId("fill").style.width=(playerDuration?Math.min(100,playerCurrent/playerDuration*100):0)+"%"},500);
+  function apply(state){
+    lastRemote=state;if(!state.videoId){showSourceGate();return}if(state.videoId!==videoId){createPlayer(state.videoId);return}if(!playerReady)return;
+    const target=expected(state),diff=target-playerCurrent;applying=true;if(Math.abs(diff)>1.4)playerCommand("seekTo",[target,true]);if(state.playing&&playerState!==PLAYING)playerCommand("playVideo");if(!state.playing&&playerState===PLAYING)playerCommand("pauseVideo");setTimeout(()=>applying=false,650);
+  }
+  async function sendControl(action,position=0,source=""){
+    if(!controller||!roomId)return false;const body=new URLSearchParams({action,position:String(position)});if(source)body.set("source",source);
+    const response=await fetch("/api/watch/"+roomId+"/control",{method:"POST",credentials:"include",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    if(response.status===403){controller=false;applyRole();byId("status").textContent="Kontrol yalnızca oda sahibinde";return false}if(!response.ok)return false;apply(await response.json());return true;
+  }
+  function fetchState(){if(roomId)fetch("/api/watch/"+roomId+"/state",{credentials:"include"}).then(r=>r.json()).then(apply).catch(()=>{})}
+  byId("sourceForm").addEventListener("submit",async event=>{event.preventDefault();const input=byId("sourceUrl"),button=byId("sourceForm").querySelector("button");button.disabled=true;byId("sourceError").textContent="";const ok=await sendControl("source",0,input.value.trim());button.disabled=false;if(!ok)byId("sourceError").textContent="Bu bağlantı desteklenmiyor veya video yerleştirmeye kapalı."});
+  byId("play").onclick=()=>sendControl(playerState===PLAYING?"pause":"play",playerCurrent);byId("back").onclick=()=>sendControl("seek",Math.max(0,playerCurrent-10));byId("forward").onclick=()=>sendControl("seek",Math.min(playerDuration||86400,playerCurrent+10));
+  byId("seek").onpointerdown=()=>seeking=true;byId("seek").oninput=event=>{if(playerDuration)byId("current").textContent=clock(playerDuration*Number(event.target.value)/100)};byId("seek").onchange=event=>{seeking=false;if(playerDuration)sendControl("seek",playerDuration*Number(event.target.value)/100)};
+  byId("captions").onchange=event=>{const language=event.target.value;if(language==="off"){playerCommand("unloadModule",["captions"]);return}playerCommand("loadModule",["captions"]);setTimeout(()=>playerCommand("setOption",["captions","track",{languageCode:language}]),180)};
+  byId("mute").onclick=()=>{muted=!muted;playerCommand(muted?"mute":"unMute");byId("mute").textContent=muted?"🔇":"🔊"};byId("fullscreen").onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else byId("stage").requestFullscreen?.()};
+  byId("stage").addEventListener("mousemove",showControls);byId("stage").addEventListener("pointerdown",showControls);byId("stage").addEventListener("touchstart",showControls,{passive:true});
+  setInterval(()=>{if(!playerReady)return;const current=lastRemote?expected(lastRemote):playerCurrent;if(!seeking){byId("current").textContent=clock(current);byId("seek").value=playerDuration?String(Math.min(100,current/playerDuration*100)):"0"}byId("duration").textContent=clock(playerDuration)},500);
   boot();
 </script>
 </body>

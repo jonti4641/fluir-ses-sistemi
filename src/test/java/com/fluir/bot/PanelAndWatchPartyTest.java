@@ -55,14 +55,16 @@ class PanelAndWatchPartyTest {
     }
 
     @Test
-    void discordActivityLoadsTheVideoDirectlyWithNativeControls() throws IOException {
+    void discordActivityIsVideoFirstAndUsesOwnerOnlyControls() throws IOException {
         try (var input = getClass().getResourceAsStream("/activity.html")) {
             assertNotNull(input);
             String activity = new String(input.readAllBytes(), StandardCharsets.UTF_8);
-            assertTrue(activity.contains("autoplay=1"));
-            assertTrue(activity.contains("controls=1"));
+            assertTrue(activity.contains("autoplay:\"1\""));
+            assertTrue(activity.contains("controls:\"0\""));
             assertTrue(activity.contains("playerFrame.onload"));
-            assertTrue(activity.contains("classList.add(\"hidden\")"));
+            assertTrue(activity.contains("Yayını yalnızca oda sahibi yönetebilir"));
+            assertTrue(activity.contains("requestFullscreen"));
+            assertTrue(activity.contains("Türkçe altyazı"));
         }
     }
 }
