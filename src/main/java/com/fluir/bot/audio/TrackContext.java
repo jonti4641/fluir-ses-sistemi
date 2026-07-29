@@ -35,4 +35,8 @@ public record TrackContext(
     public TrackContext markReResolved() {
         return new TrackContext(originalQuery, title, author, permanentUri, source, attemptedSources, true, fallbackAttempt + 1, requestedBy, messageChannelId);
     }
+
+    public TrackContext markAlternativeResolved() {
+        return new TrackContext(originalQuery, title, author, permanentUri, source, attemptedSources, true, fallbackAttempt + 1, requestedBy, messageChannelId);
+    }
 }
