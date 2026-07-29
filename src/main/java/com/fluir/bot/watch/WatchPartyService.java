@@ -42,6 +42,8 @@ public final class WatchPartyService {
     private static final int MAX_ROOMS = 1_000;
     private static final int MAX_CONTROL_BODY = 2_048;
     private static final int MAX_YOUTUBE_EMBED_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_YOUTUBE_API_BODY = 1024 * 1024;
+    private static final int MAX_YOUTUBE_API_RESPONSE = 4 * 1024 * 1024;
     private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
     private static final Pattern HTML_NONCE_ATTRIBUTE = Pattern.compile("(?i)\\snonce=(?:\"[^\"]*\"|'[^']*')");
     private static final String CONTROL_COOKIE = "__Host-FluirControl";
@@ -80,9 +82,94 @@ public final class WatchPartyService {
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
         server.createContext("/youtube-embed/", this::handleYouTubeEmbed);
+        server.createContext("/youtubei/", this::handleYouTubeApi);
         server.createContext("/s/", this::handleYouTubeAsset);
         server.createContext("/yts/", this::handleYouTubeAsset);
         server.createContext("/", this::handleActivityPage);
+    }
+
+    /**
+     * Resmi embed oynatıcısının aynı kök altındaki sınırlı YouTube API çağrılarını
+     * sabit www.youtube.com hedefine iletir. Kimlik bilgileri ve çerezler taşınmaz.
+     */
+    private void handleYouTubeApi(HttpExchange exchange) throws IOException {
+        String method = exchange.getRequestMethod();
+        if (!"GET".equals(method) && !"POST".equals(method)) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        String path = exchange.getRequestURI().getPath();
+        if (!("/youtubei/v1/player".equals(path)
+                || "/youtubei/v1/next".equals(path)
+                || "/youtubei/v1/log_event".equals(path)
+                || "/youtubei/v1/get_transcript".equals(path))) {
+            sendJson(exchange, 404, "{\"error\":\"youtube_api_not_allowed\"}");
+            return;
+        }
+        byte[] requestBody = exchange.getRequestBody().readNBytes(MAX_YOUTUBE_API_BODY + 1);
+        if (requestBody.length > MAX_YOUTUBE_API_BODY) {
+            sendJson(exchange, 413, "{\"error\":\"body_too_large\"}");
+            return;
+        }
+        URI target;
+        try {
+            target = new URI("https", "www.youtube.com", path, exchange.getRequestURI().getRawQuery(), null);
+        } catch (Exception e) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_youtube_api_request\"}");
+            return;
+        }
+        String activityOrigin = activityOrigin();
+        HttpRequest.Builder builder = HttpRequest.newBuilder(target)
+                .timeout(Duration.ofSeconds(12))
+                .header("Accept", "application/json")
+                .header("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.7")
+                .header("Content-Type", exchange.getRequestHeaders().getFirst("Content-Type") == null
+                        ? "application/json" : exchange.getRequestHeaders().getFirst("Content-Type"))
+                .header("Origin", activityOrigin)
+                .header("Referer", activityOrigin + "/")
+                .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0");
+        copyAllowedHeader(exchange, builder, "X-YouTube-Client-Name");
+        copyAllowedHeader(exchange, builder, "X-YouTube-Client-Version");
+        copyAllowedHeader(exchange, builder, "X-Goog-Visitor-Id");
+        builder.method(method, "POST".equals(method)
+                ? HttpRequest.BodyPublishers.ofByteArray(requestBody)
+                : HttpRequest.BodyPublishers.noBody());
+        try {
+            HttpResponse<InputStream> response = youtubeAssets.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            byte[] body;
+            try (InputStream input = response.body()) {
+                body = input.readNBytes(MAX_YOUTUBE_API_RESPONSE + 1);
+            }
+            if (body.length > MAX_YOUTUBE_API_RESPONSE) {
+                sendJson(exchange, 502, "{\"error\":\"youtube_api_response_too_large\"}");
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type",
+                    response.headers().firstValue("Content-Type").orElse("application/json; charset=utf-8"));
+            exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+            exchange.sendResponseHeaders(response.statusCode(), body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJson(exchange, 503, "{\"error\":\"youtube_api_interrupted\"}");
+        } catch (IOException e) {
+            logger.warn("YouTube oynatıcı API isteği başarısız: {}", e.getClass().getSimpleName());
+            if (exchange.getResponseCode() < 0) sendJson(exchange, 502, "{\"error\":\"youtube_api_unavailable\"}");
+        }
+    }
+
+    private static void copyAllowedHeader(HttpExchange exchange, HttpRequest.Builder builder, String name) {
+        String value = exchange.getRequestHeaders().getFirst(name);
+        if (value != null && !value.isBlank() && value.length() <= 256) builder.header(name, value);
+    }
+
+    private String activityOrigin() {
+        return SNOWFLAKE.matcher(applicationId).matches()
+                ? "https://" + applicationId + ".discordsays.com"
+                : publicBaseUrl;
     }
 
     /**
@@ -110,9 +197,7 @@ public final class WatchPartyService {
             sendJson(exchange, 400, "{\"error\":\"invalid_youtube_source\"}");
             return;
         }
-        String activityOrigin = SNOWFLAKE.matcher(applicationId).matches()
-                ? "https://" + applicationId + ".discordsays.com"
-                : publicBaseUrl;
+        String activityOrigin = activityOrigin();
         HttpRequest request = HttpRequest.newBuilder(target)
                 .timeout(Duration.ofSeconds(12))
                 .header("Accept", "text/html,application/xhtml+xml")
