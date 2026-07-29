@@ -128,6 +128,7 @@ public final class WatchPartyService {
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
         server.createContext("/youtube-embed/", this::handleYouTubeEmbed);
+        server.createContext("/youtubei/", this::handleYouTubeApi);
         server.createContext("/googlevideo/", this::handleGoogleVideo);
         server.createContext("/s/", this::handleYouTubeAsset);
         server.createContext("/yts/", this::handleYouTubeAsset);
@@ -285,16 +286,15 @@ public final class WatchPartyService {
             sendJson(exchange, 400, "{\"error\":\"invalid_youtube_api_request\"}");
             return;
         }
-        String activityOrigin = activityOrigin();
         HttpRequest.Builder builder = HttpRequest.newBuilder(target)
                 .timeout(Duration.ofSeconds(12))
                 .header("Accept", "application/json")
                 .header("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.7")
                 .header("Content-Type", exchange.getRequestHeaders().getFirst("Content-Type") == null
                         ? "application/json" : exchange.getRequestHeaders().getFirst("Content-Type"))
-                .header("Origin", activityOrigin)
-                .header("Referer", activityOrigin + "/")
-                .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0");
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36");
         copyAllowedHeader(exchange, builder, "X-YouTube-Client-Name");
         copyAllowedHeader(exchange, builder, "X-YouTube-Client-Version");
         copyAllowedHeader(exchange, builder, "X-Goog-Visitor-Id");
@@ -413,7 +413,7 @@ public final class WatchPartyService {
 
     static String normalizeYouTubeEmbedHtml(String html) {
         String normalized = HTML_NONCE_ATTRIBUTE.matcher(html == null ? "" : html).replaceAll("");
-        normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=proxy-route-2$3");
+        normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=proxy-route-3$3");
         int head = normalized.toLowerCase().indexOf("<head>");
         if (head >= 0) normalized = normalized.substring(0, head + 6) + YOUTUBE_PROXY_BOOTSTRAP + normalized.substring(head + 6);
         return normalized;
@@ -560,10 +560,7 @@ public final class WatchPartyService {
                     sendJson(exchange, 502, "{\"error\":\"youtube_asset_unavailable\"}");
                     return;
                 }
-                String script = new String(raw, StandardCharsets.UTF_8)
-                        .replace("`/youtubei/", "`/youtube/youtubei/")
-                        .replace("\"/youtubei/", "\"/youtube/youtubei/")
-                        .replace("'/youtubei/", "'/youtube/youtubei/");
+                String script = new String(raw, StandardCharsets.UTF_8);
                 byte[] normalized = script.getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(200, normalized.length);
                 try (OutputStream output = exchange.getResponseBody()) {

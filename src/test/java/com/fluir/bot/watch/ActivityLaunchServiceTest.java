@@ -14,7 +14,7 @@ class ActivityLaunchServiceTest {
         String normalized = WatchPartyService.normalizeYouTubeEmbedHtml(html);
 
         assertFalse(normalized.contains("nonce=\"old\""));
-        assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-2"));
+        assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-3"));
         assertTrue(normalized.contains("location.origin+\"/googlevideo/\"+subdomain"));
         assertTrue(normalized.contains("window.fetch=(input,init)"));
         assertFalse(normalized.contains("target:\"{subdomain}.googlevideo.com\""));
