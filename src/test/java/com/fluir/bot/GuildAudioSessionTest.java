@@ -6,7 +6,7 @@ import com.fluir.bot.audio.VoiceConnectionState;
 
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.SelfMember;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
@@ -33,7 +33,7 @@ class GuildAudioSessionTest {
     @Mock private Guild mockGuild;
     @Mock private AudioChannel mockAudioChannel;
     @Mock private GuildMessageChannel mockMessageChannel;
-    @Mock private Member mockSelfMember;
+    @Mock private SelfMember mockSelfMember;
     @Mock private AudioManager mockAudioManager;
 
     private AudioPlayerManager fluirAudioPlayerManager;
