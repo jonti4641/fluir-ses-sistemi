@@ -46,6 +46,7 @@ public final class WatchPartyService {
     private static final int MAX_YOUTUBE_API_RESPONSE = 4 * 1024 * 1024;
     private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
     private static final Pattern HTML_NONCE_ATTRIBUTE = Pattern.compile("(?i)\\snonce=(?:\"[^\"]*\"|'[^']*')");
+    private static final Pattern HTML_PLAYER_SCRIPT = Pattern.compile("(?i)(<script\\b[^>]*\\bsrc=\")(/s/[^\"]+)(\")");
     private static final String CONTROL_COOKIE = "__Host-FluirControl";
 
     private final String publicBaseUrl;
@@ -222,6 +223,7 @@ public final class WatchPartyService {
                 return;
             }
             String normalized = HTML_NONCE_ATTRIBUTE.matcher(new String(raw, StandardCharsets.UTF_8)).replaceAll("");
+            normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=api-route-1$3");
             byte[] body = normalized.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
@@ -376,6 +378,7 @@ public final class WatchPartyService {
                 return;
             }
             if (contentType.toLowerCase().contains("javascript")) {
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
                 byte[] raw;
                 try (InputStream input = response.body()) {
                     raw = input.readNBytes((int) MAX_YOUTUBE_ASSET_BYTES + 1);
