@@ -1,6 +1,7 @@
 package com.fluir.bot;
 
 import club.minnced.discord.jdave.interop.JDaveSessionFactory;
+import club.minnced.discord.jdave.ffi.LibDave;
 import com.fluir.bot.audio.AudioPlayerManager;
 import com.fluir.bot.audio.VoiceUpdateListener;
 import com.fluir.bot.commands.CommandManager;
@@ -33,6 +34,9 @@ public class FluirBot {
         }
 
         try {
+            short daveProtocolVersion = LibDave.getMaxSupportedProtocolVersion();
+            logger.info("✅ DAVE native kütüphanesi hazır. Desteklenen protokol: {}", daveProtocolVersion);
+
             logger.info("⚙️ Ses motoru ve oturum yöneticisi başlatılıyor...");
             audioPlayerManager = new AudioPlayerManager();
 
@@ -68,7 +72,7 @@ public class FluirBot {
             logger.info("   ✅ Fluir Ses Sistemi HAZIR!          ");
             logger.info("========================================");
 
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("❌ Bot başlatılırken kritik hata: {}", e.getMessage(), e);
             System.exit(1);
         }
