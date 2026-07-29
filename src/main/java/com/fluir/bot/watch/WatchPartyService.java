@@ -41,11 +41,13 @@ public final class WatchPartyService {
     private static final Duration PENDING_TTL = Duration.ofMinutes(2);
     private static final int MAX_ROOMS = 1_000;
     private static final int MAX_CONTROL_BODY = 2_048;
+    private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
     private static final String CONTROL_COOKIE = "__Host-FluirControl";
 
     private final String publicBaseUrl;
     private final String botToken;
     private final HttpClient discordApi;
+    private final HttpClient youtubeAssets;
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
     private final Map<Long, PendingLaunch> pendingLaunches = new ConcurrentHashMap<>();
@@ -64,6 +66,7 @@ public final class WatchPartyService {
         this.publicBaseUrl = publicBaseUrl == null ? "" : publicBaseUrl;
         this.botToken = botToken == null ? "" : botToken;
         this.discordApi = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+        this.youtubeAssets = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.htmlTemplate = loadTemplate();
         this.activityTemplate = loadTextResource("/activity.html");
         this.discordSdk = loadBytesResource("/discord-sdk.js");
@@ -74,6 +77,8 @@ public final class WatchPartyService {
         server.createContext("/api/watch", this::handleApi);
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
+        server.createContext("/s/", this::handleYouTubeAsset);
+        server.createContext("/yts/", this::handleYouTubeAsset);
         server.createContext("/", this::handleActivityPage);
     }
 
@@ -160,6 +165,69 @@ public final class WatchPartyService {
         exchange.sendResponseHeaders(200, discordSdk.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(discordSdk);
+        }
+    }
+
+    /**
+     * Discord URL eşlemesiyle gelen YouTube embed sayfasının kök-bağıl statik
+     * oynatıcı dosyalarını sabit www.youtube.com kaynağından geçirir. İstek hedefi
+     * kullanıcı tarafından seçilemez; video akışı veya keyfi URL proxy'lenmez.
+     */
+    private void handleYouTubeAsset(HttpExchange exchange) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod()) && !"HEAD".equals(exchange.getRequestMethod())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        String path = exchange.getRequestURI().getRawPath();
+        if (path == null || (!path.startsWith("/s/") && !path.startsWith("/yts/"))
+                || path.contains("..") || path.length() > 1_500) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_asset_path\"}");
+            return;
+        }
+        URI target;
+        try {
+            target = new URI("https", "www.youtube.com", path, exchange.getRequestURI().getRawQuery(), null);
+        } catch (Exception e) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_asset_path\"}");
+            return;
+        }
+        HttpRequest request = HttpRequest.newBuilder(target)
+                .timeout(Duration.ofSeconds(12))
+                .header("Accept", "*/*")
+                .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0")
+                .GET().build();
+        try {
+            HttpResponse<InputStream> response = youtubeAssets.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            long declaredLength = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+            if (response.statusCode() != 200 || declaredLength > MAX_YOUTUBE_ASSET_BYTES) {
+                response.body().close();
+                sendJson(exchange, 502, "{\"error\":\"youtube_asset_unavailable\"}");
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", response.headers().firstValue("Content-Type").orElse("application/octet-stream"));
+            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+            if ("HEAD".equals(exchange.getRequestMethod())) {
+                response.body().close();
+                exchange.sendResponseHeaders(200, -1);
+                return;
+            }
+            exchange.sendResponseHeaders(200, declaredLength >= 0 ? declaredLength : 0);
+            try (InputStream input = response.body(); OutputStream output = exchange.getResponseBody()) {
+                byte[] buffer = new byte[16_384];
+                long total = 0;
+                for (int read; (read = input.read(buffer)) >= 0;) {
+                    total += read;
+                    if (total > MAX_YOUTUBE_ASSET_BYTES) throw new IOException("YouTube asset boyut sınırını aştı");
+                    output.write(buffer, 0, read);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJson(exchange, 503, "{\"error\":\"youtube_asset_interrupted\"}");
+        } catch (IOException e) {
+            logger.warn("YouTube oynatıcı varlığı alınamadı: {}", e.getClass().getSimpleName());
+            if (exchange.getResponseCode() < 0) sendJson(exchange, 502, "{\"error\":\"youtube_asset_unavailable\"}");
         }
     }
 
