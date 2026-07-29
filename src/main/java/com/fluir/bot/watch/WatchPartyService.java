@@ -10,6 +10,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -31,28 +34,75 @@ public final class WatchPartyService {
     private static final Logger logger = LoggerFactory.getLogger(WatchPartyService.class);
     private static final Pattern VIDEO_ID = Pattern.compile("^[A-Za-z0-9_-]{11}$");
     private static final Pattern WATCH_URL = Pattern.compile("(?:youtu\\.be/|youtube\\.com/(?:watch\\?(?:[^#]*&)?v=|shorts/|embed/))([A-Za-z0-9_-]{11})", Pattern.CASE_INSENSITIVE);
+    private static final Pattern INSTANCE_ID = Pattern.compile("^[A-Za-z0-9_-]{10,200}$");
+    private static final Pattern SNOWFLAKE = Pattern.compile("^[0-9]{15,22}$");
     private static final Duration ROOM_TTL = Duration.ofHours(6);
+    private static final Duration PENDING_TTL = Duration.ofMinutes(2);
     private static final int MAX_ROOMS = 1_000;
     private static final int MAX_CONTROL_BODY = 2_048;
 
     private final String publicBaseUrl;
+    private final String botToken;
+    private final HttpClient discordApi;
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
+    private final Map<Long, PendingLaunch> pendingLaunches = new ConcurrentHashMap<>();
+    private final Map<String, String> instanceRooms = new ConcurrentHashMap<>();
     private final Map<String, RequestWindow> requestWindows = new ConcurrentHashMap<>();
     private final String htmlTemplate;
+    private final String activityTemplate;
+    private final byte[] discordSdk;
+    private volatile String applicationId = "";
 
     public WatchPartyService(String publicBaseUrl) {
+        this(publicBaseUrl, "");
+    }
+
+    public WatchPartyService(String publicBaseUrl, String botToken) {
         this.publicBaseUrl = publicBaseUrl == null ? "" : publicBaseUrl;
+        this.botToken = botToken == null ? "" : botToken;
+        this.discordApi = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
         this.htmlTemplate = loadTemplate();
+        this.activityTemplate = loadTextResource("/activity.html");
+        this.discordSdk = loadBytesResource("/discord-sdk.js");
     }
 
     public void register(HttpServer server) {
         server.createContext("/watch", this::handleWatchPage);
         server.createContext("/api/watch", this::handleApi);
+        server.createContext("/api/activity", this::handleActivityApi);
+        server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
+        server.createContext("/", this::handleActivityPage);
+    }
+
+    public void configureApplication(String applicationId) {
+        if (applicationId == null || !SNOWFLAKE.matcher(applicationId).matches()) {
+            throw new IllegalArgumentException("Geçersiz Discord application ID");
+        }
+        this.applicationId = applicationId;
     }
 
     public boolean isAvailable() {
         return !publicBaseUrl.isBlank();
+    }
+
+    public boolean isActivityAvailable() {
+        return isAvailable() && !botToken.isBlank() && !applicationId.isBlank();
+    }
+
+    public PendingLaunch prepareActivity(long channelId, String rawYouTubeUrl, long ownerUserId) {
+        if (!isActivityAvailable()) throw new IllegalStateException("Discord Activity henüz hazır değil.");
+        String videoId = extractYouTubeId(rawYouTubeUrl);
+        if (videoId == null) throw new IllegalArgumentException("Geçerli bir YouTube video bağlantısı gerekli.");
+        cleanupExpiredRooms();
+        PendingLaunch pending = new PendingLaunch(channelId, videoId, ownerUserId,
+                System.currentTimeMillis() + PENDING_TTL.toMillis());
+        pendingLaunches.put(channelId, pending);
+        return pending;
+    }
+
+    public void cancelPrepared(PendingLaunch pending) {
+        if (pending != null) pendingLaunches.remove(pending.channelId(), pending);
     }
 
     public WatchRoom createRoom(String rawYouTubeUrl, long ownerUserId) {
@@ -73,6 +123,131 @@ public final class WatchPartyService {
         if (VIDEO_ID.matcher(value).matches()) return value;
         Matcher matcher = WATCH_URL.matcher(value);
         return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private void handleActivityPage(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if (!("/".equals(path) || "/activity".equals(path))) {
+            sendJson(exchange, 404, "{\"error\":\"not_found\"}");
+            return;
+        }
+        if (!"GET".equals(exchange.getRequestMethod())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        if (!isActivityAvailable()) {
+            sendHtml(exchange, 503, "<!doctype html><meta charset=\"utf-8\"><title>Activity hazırlanıyor</title><body>Activity henüz yapılandırılmadı.</body>");
+            return;
+        }
+        String nonce = randomId();
+        String html = activityTemplate
+                .replace("__DISCORD_CLIENT_ID__", applicationId)
+                .replace("__NONCE__", nonce);
+        setActivitySecurityHeaders(exchange, nonce);
+        sendHtml(exchange, 200, html);
+    }
+
+    private void handleDiscordSdk(HttpExchange exchange) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        exchange.getResponseHeaders().set("Content-Type", "text/javascript; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control", "public, max-age=86400, immutable");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.sendResponseHeaders(200, discordSdk.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(discordSdk);
+        }
+    }
+
+    private void handleActivityApi(HttpExchange exchange) throws IOException {
+        if (!"/api/activity/bootstrap".equals(exchange.getRequestURI().getPath())) {
+            sendJson(exchange, 404, "{\"error\":\"not_found\"}");
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        if (!validOrigin(exchange) || !allowControl(exchange, "activity-bootstrap")) {
+            sendJson(exchange, 429, "{\"error\":\"request_rejected\"}");
+            return;
+        }
+        byte[] body = exchange.getRequestBody().readNBytes(MAX_CONTROL_BODY + 1);
+        if (body.length > MAX_CONTROL_BODY) {
+            sendJson(exchange, 413, "{\"error\":\"body_too_large\"}");
+            return;
+        }
+        Map<String, String> form = parseForm(new String(body, StandardCharsets.UTF_8));
+        String instanceId = form.getOrDefault("instanceId", "");
+        String channelValue = form.getOrDefault("channelId", "");
+        if (!INSTANCE_ID.matcher(instanceId).matches() || !SNOWFLAKE.matcher(channelValue).matches()) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_activity_context\"}");
+            return;
+        }
+        long channelId;
+        try {
+            channelId = Long.parseUnsignedLong(channelValue);
+        } catch (NumberFormatException e) {
+            sendJson(exchange, 400, "{\"error\":\"invalid_channel\"}");
+            return;
+        }
+        if (!verifyActivityInstance(instanceId, channelValue)) {
+            sendJson(exchange, 403, "{\"error\":\"activity_instance_rejected\"}");
+            return;
+        }
+        Room room = roomForActivity(instanceId, channelId);
+        if (room == null) {
+            sendJson(exchange, 409, "{\"error\":\"run_izle_in_this_channel\"}");
+            return;
+        }
+        sendJson(exchange, 200, room.bootstrapSnapshot());
+    }
+
+    private synchronized Room roomForActivity(String instanceId, long channelId) {
+        cleanupExpiredRooms();
+        String existingId = instanceRooms.get(instanceId);
+        Room existing = existingId == null ? null : rooms.get(existingId);
+        if (existing != null && !existing.expired()) return existing;
+
+        PendingLaunch pending = pendingLaunches.get(channelId);
+        if (pending == null || pending.expired()) return null;
+        if (rooms.size() >= MAX_ROOMS) return null;
+        String roomId = randomId();
+        Room room = new Room(roomId, pending.videoId(), pending.ownerUserId());
+        rooms.put(roomId, room);
+        instanceRooms.put(instanceId, roomId);
+        pendingLaunches.remove(channelId, pending);
+        return room;
+    }
+
+    private boolean verifyActivityInstance(String instanceId, String channelId) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create("https://discord.com/api/v10/applications/"
+                            + applicationId + "/activity-instances/" + instanceId))
+                    .timeout(Duration.ofSeconds(2))
+                    .header("Authorization", "Bot " + botToken)
+                    .header("User-Agent", "FluirBot/1.0 DiscordActivity")
+                    .GET().build();
+            HttpResponse<String> response = discordApi.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) return false;
+            String json = response.body();
+            return jsonFieldEquals(json, "application_id", applicationId)
+                    && jsonFieldEquals(json, "instance_id", instanceId)
+                    && jsonFieldEquals(json, "channel_id", channelId);
+        } catch (IOException e) {
+            logger.warn("Discord Activity instance doğrulaması başarısız: {}", e.getClass().getSimpleName());
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private static boolean jsonFieldEquals(String json, String field, String expected) {
+        return Pattern.compile("\\\"" + Pattern.quote(field) + "\\\"\\s*:\\s*\\\""
+                + Pattern.quote(expected) + "\\\"").matcher(json).find();
     }
 
     private void handleWatchPage(HttpExchange exchange) throws IOException {
@@ -191,9 +366,13 @@ public final class WatchPartyService {
         try {
             URI expected = URI.create(publicBaseUrl);
             URI actual = URI.create(origin);
-            return Objects.equals(expected.getScheme(), actual.getScheme())
+            boolean publicOrigin = Objects.equals(expected.getScheme(), actual.getScheme())
                     && Objects.equals(expected.getHost(), actual.getHost())
                     && effectivePort(expected) == effectivePort(actual);
+            boolean activityOrigin = "https".equalsIgnoreCase(actual.getScheme())
+                    && actual.getPort() < 0
+                    && (applicationId + ".discordsays.com").equalsIgnoreCase(actual.getHost());
+            return publicOrigin || activityOrigin;
         } catch (IllegalArgumentException e) {
             return false;
         }
@@ -209,6 +388,8 @@ public final class WatchPartyService {
 
     private void cleanupExpiredRooms() {
         rooms.entrySet().removeIf(entry -> entry.getValue().expired());
+        instanceRooms.entrySet().removeIf(entry -> !rooms.containsKey(entry.getValue()));
+        pendingLaunches.entrySet().removeIf(entry -> entry.getValue().expired());
         if (requestWindows.size() > 10_000) {
             long cutoff = System.currentTimeMillis() - 60_000;
             requestWindows.entrySet().removeIf(entry -> entry.getValue().startedAt < cutoff);
@@ -244,11 +425,19 @@ public final class WatchPartyService {
     }
 
     private static String loadTemplate() {
-        try (InputStream input = WatchPartyService.class.getResourceAsStream("/watch-party.html")) {
-            if (input == null) throw new IllegalStateException("watch-party.html bulunamadı");
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        return loadTextResource("/watch-party.html");
+    }
+
+    private static String loadTextResource(String path) {
+        return new String(loadBytesResource(path), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] loadBytesResource(String path) {
+        try (InputStream input = WatchPartyService.class.getResourceAsStream(path)) {
+            if (input == null) throw new IllegalStateException(path + " bulunamadı");
+            return input.readAllBytes();
         } catch (IOException e) {
-            throw new IllegalStateException("Ortak izleme şablonu okunamadı", e);
+            throw new IllegalStateException(path + " okunamadı", e);
         }
     }
 
@@ -261,9 +450,21 @@ public final class WatchPartyService {
                 "default-src 'none'; script-src 'nonce-" + nonce + "' https://www.youtube.com https://s.ytimg.com; "
                         + "style-src 'nonce-" + nonce + "'; img-src 'self' data: https://i.ytimg.com; "
                         + "frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self'; "
-                        + "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors https://discord.com https://*.discord.com");
+                        + "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com");
         exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
         exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+    }
+
+    private static void setActivitySecurityHeaders(HttpExchange exchange, String nonce) {
+        exchange.getResponseHeaders().set("Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'; "
+                        + "img-src 'self' data: https://i.ytimg.com; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; "
+                        + "connect-src 'self'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; "
+                        + "frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com");
+        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+        exchange.getResponseHeaders().set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), fullscreen=(self)");
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
     }
@@ -289,6 +490,9 @@ public final class WatchPartyService {
     }
 
     public record WatchRoom(String id, String videoId, String url, long expiresAt) {}
+    public record PendingLaunch(long channelId, String videoId, long ownerUserId, long expiresAt) {
+        private boolean expired() { return System.currentTimeMillis() >= expiresAt; }
+    }
     private record RequestWindow(long startedAt, int count) {}
 
     private static final class Room {
@@ -325,6 +529,10 @@ public final class WatchPartyService {
                     + ",\"position\":" + String.format(java.util.Locale.ROOT, "%.3f", current)
                     + ",\"serverTime\":" + now + ",\"version\":" + version
                     + ",\"participants\":" + subscribers.size() + ",\"owner\":\"" + ownerUserId + "\"}";
+        }
+
+        private synchronized String bootstrapSnapshot() {
+            return "{\"roomId\":\"" + id + "\"," + snapshot().substring(1);
         }
 
         private void broadcast() {

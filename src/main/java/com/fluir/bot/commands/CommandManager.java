@@ -15,8 +15,6 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
-import net.dv8tion.jda.api.components.buttons.Button;
-import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
@@ -27,6 +25,7 @@ import net.dv8tion.jda.api.Permission;
 import com.fluir.bot.persistence.GuildSettings;
 import com.fluir.bot.persistence.StoredTrack;
 import com.fluir.bot.security.CommandRateLimiter;
+import com.fluir.bot.watch.ActivityLaunchService;
 import com.fluir.bot.watch.WatchPartyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +48,7 @@ public class CommandManager extends ListenerAdapter {
     private static final Color BOT_COLOR = new Color(88, 101, 242);
 
     private final AudioPlayerManager audioPlayerManager;
+    private final ActivityLaunchService activityLauncher = new ActivityLaunchService();
     private final CommandRateLimiter rateLimiter = new CommandRateLimiter(8, 10_000);
     private final long startedAt = System.currentTimeMillis();
 
@@ -496,28 +496,43 @@ public class CommandManager extends ListenerAdapter {
 
     private void handleWatchParty(SlashCommandInteractionEvent event) {
         WatchPartyService service = audioPlayerManager.getWatchPartyService();
-        if (!service.isAvailable()) {
-            event.reply("❌ Ortak izleme için Railway Public Domain veya PUBLIC_BASE_URL ayarlanmalı.")
+        if (!service.isActivityAvailable()) {
+            event.reply("❌ Discord Activity henüz hazır değil. Railway Public Domain ve Activity ayarları kontrol edilmeli.")
                     .setEphemeral(true).queue();
+            return;
+        }
+        Member member = event.getMember();
+        AudioChannel voiceChannel = getUserAudioChannel(member, null);
+        if (voiceChannel == null) {
+            event.reply("❌ Önce ortak izleme yapılacak ses kanalına katıl.").setEphemeral(true).queue();
+            return;
+        }
+        if (event.getChannelIdLong() != voiceChannel.getIdLong()) {
+            event.reply("❌ `/izle` komutunu bulunduğun ses kanalının yazılı sohbetinde çalıştır.")
+                    .setEphemeral(true).queue();
+            return;
+        }
+        if (!member.hasPermission(voiceChannel, Permission.USE_EMBEDDED_ACTIVITIES)) {
+            event.reply("❌ Bu kanalda **Etkinlikleri Kullan** iznin yok.").setEphemeral(true).queue();
             return;
         }
         String youtubeUrl = event.getOption("youtube").getAsString();
         try {
-            WatchPartyService.WatchRoom room = service.createRoom(youtubeUrl, event.getUser().getIdLong());
-            EmbedBuilder embed = new EmbedBuilder()
-                    .setTitle("🎬 Fluir Ortak İzleme Odası")
-                    .setDescription("YouTube videosu için **6 saatlik senkron oda** hazırlandı.\n\n"
-                            + "• Oynat, duraklat ve ±10 saniye kontrolleri herkeste eşitlenir.\n"
-                            + "• Katılımcı, zaman farkı ve bağlantı durumu canlı gösterilir.\n"
-                            + "• Video bot üzerinden aktarılmaz; resmî YouTube oynatıcısı kullanılır.")
-                    .addField("Oda", room.id().substring(0, 8), true)
-                    .addField("Video ID", room.videoId(), true)
-                    .addField("Güvenlik", "Bağlantıya sahip kişiler katılabilir", false)
-                    .setThumbnail("https://i.ytimg.com/vi/" + room.videoId() + "/hqdefault.jpg")
-                    .setColor(new Color(0, 210, 190));
-            event.replyEmbeds(embed.build())
-                    .addComponents(ActionRow.of(Button.link(room.url(), "🎬 Ortak İzlemeyi Aç")))
-                    .queue();
+            WatchPartyService.PendingLaunch pending = service.prepareActivity(
+                    event.getChannelIdLong(), youtubeUrl, event.getUser().getIdLong());
+            activityLauncher.launch(event.getIdLong(), event.getToken()).thenAccept(success -> {
+                if (success) {
+                    logger.info("Discord Activity başlatıldı [Guild: {}, Channel: {}, Video: {}]",
+                            event.getGuild().getIdLong(), event.getChannelIdLong(), pending.videoId());
+                    return;
+                }
+                service.cancelPrepared(pending);
+                if (!event.isAcknowledged()) {
+                    event.reply("❌ Activity başlatılamadı. Discord Developer Portal'da Activities etkin olmalı.")
+                            .setEphemeral(true).queue(null,
+                                    error -> logger.warn("Activity hata yanıtı gönderilemedi: {}", error.getMessage()));
+                }
+            });
         } catch (IllegalArgumentException e) {
             event.reply("❌ Geçerli bir YouTube video bağlantısı gir.").setEphemeral(true).queue();
         } catch (IllegalStateException e) {

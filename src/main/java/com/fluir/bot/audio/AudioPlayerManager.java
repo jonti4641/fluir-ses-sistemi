@@ -43,7 +43,7 @@ public class AudioPlayerManager {
         this.store = store;
         this.config = config;
         this.notifier = notifier;
-        this.watchPartyService = new WatchPartyService(config.publicBaseUrl());
+        this.watchPartyService = new WatchPartyService(config.publicBaseUrl(), config.discordToken());
         this.playbackService = new MusicPlaybackService(this, store, config, notifier);
         registerSources();
     }

@@ -49,6 +49,7 @@ public class FluirBot {
                     .enableIntents(GatewayIntent.GUILD_MESSAGES,GatewayIntent.MESSAGE_CONTENT,GatewayIntent.GUILD_VOICE_STATES)
                     .setMemberCachePolicy(MemberCachePolicy.VOICE).enableCache(CacheFlag.VOICE_STATE)
                     .addEventListeners(commands,new VoiceUpdateListener(audioPlayerManager)).build().awaitReady();
+            audioPlayerManager.getWatchPartyService().configureApplication(jda.getSelfUser().getId());
             healthServer=new HealthServer(config.port(),store,()->jda,audioPlayerManager,config.healthMetricsToken());
             CommandManager.registerSlashCommands(jda);
             registerShutdownHook();

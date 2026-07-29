@@ -7,7 +7,7 @@
 ## ✨ Özellikler
 
 - 🎚️ **Canlı ayrıntılı panel** — 10 saniyede yenilenen zaman çizgisi, yüzde, kalan süre, albüm kapağı, kuyruk özeti ve iki sıra kontrol
-- 🎬 **YouTube Watch Party** — 6 saatlik odalarda ortak oynat/duraklat/seek, katılımcı ve senkron farkı göstergesi
+- 🎬 **Discord Activity Watch Party** — ses kanalının içinde açılan YouTube ekranı; ortak oynat/duraklat/seek, katılımcı ve senkron farkı göstergesi
 - 💾 **Kalıcı veriler** — sunucu ayarları, favoriler, geçmiş, çalma listeleri ve kuyruk kurtarma
 - 🎛️ **Düğmeli kontrol paneli** — yalnızca ilk gerçek ses karesinden sonra “çalıyor” duyurusu
 - 🛡️ **Ek güvenlik** — SSRF/LFI koruması, izinli HTTPS alan adları, oran ve kuyruk sınırı
@@ -85,6 +85,19 @@ java -jar target/fluir-ses-sistemi-1.0.0.jar
 Ortak izleme için serviste **Public Networking** alan adı oluştur. Railway bu alan adını
 `RAILWAY_PUBLIC_DOMAIN` olarak otomatik sağlar; istenirse `PUBLIC_BASE_URL` değişkeniyle
 başka bir HTTPS alan adı kullanılabilir.
+
+### Discord Activity kurulumu
+
+1. Discord Developer Portal'da bot uygulamasını açıp **Activities → Settings → Enable Activities** seçeneğini etkinleştir.
+2. Railway Public Networking ile oluşan alan adını kopyala (ör. `fluir-production.up.railway.app`).
+3. **Activities → URL Mappings** altında, aşağıdaki sırayla iki eşleme ekle:
+   - `/youtube` → `www.youtube.com`
+   - `/` → Railway alan adı (yalnızca alan adı; `https://` ekleme)
+4. Desktop ve Mobile destek platformlarını etkinleştir. Test hesabında Discord Developer Mode açık olmalı.
+5. Ses kanalına katıl, o ses kanalının yazılı sohbetinde `/izle youtube:<bağlantı>` çalıştır.
+
+Activity oturumu backend tarafından Discord'un Activity Instance API'siyle doğrulanır. Oda isteği
+iki dakika içinde Activity tarafından alınmazsa iptal edilir; oda ve kontrol istekleri oran sınırlıdır.
 
 ---
 

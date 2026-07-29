@@ -35,4 +35,19 @@ class PanelAndWatchPartyTest {
         assertNull(WatchPartyService.extractYouTubeId("https://example.com/watch?v=dQw4w9WgXcQ"));
         assertNull(WatchPartyService.extractYouTubeId("javascript:alert(1)"));
     }
+
+    @Test
+    void activityLaunchIsPreparedOnlyAfterSecureConfiguration() {
+        WatchPartyService service = new WatchPartyService("https://fluir.example", "test-bot-token");
+        assertFalse(service.isActivityAvailable());
+        service.configureApplication("123456789012345678");
+        assertTrue(service.isActivityAvailable());
+
+        WatchPartyService.PendingLaunch pending = service.prepareActivity(
+                223456789012345678L, "https://youtu.be/dQw4w9WgXcQ", 323456789012345678L);
+        assertEquals("dQw4w9WgXcQ", pending.videoId());
+        assertEquals(223456789012345678L, pending.channelId());
+        assertTrue(pending.expiresAt() > System.currentTimeMillis());
+        service.cancelPrepared(pending);
+    }
 }
