@@ -15,8 +15,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -201,11 +203,14 @@ public class MusicPlaybackService {
             return;
         }
 
-        // Zaten 1 kez re-resolve edildiyse 2. kez denenmez (sonsuz döngü koruması)
+        // Kalıcı URI yenilemesi de 404 verdiyse aynı şarkının farklı bir
+        // SoundCloud yüklemesini bir kez ararız. Üçüncü deneme yapılmaz.
         if (context.isReResolved()) {
-            logger.warn("⚠️ [Guild: {}] Parça zaten re-resolve edildi fakat tekrar 404 verdi. Sıradaki parçaya geçiliyor.", session.getGuildId());
-            sendChannelMessage(session.getLastMessageChannel(), "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
-            session.getScheduler().advanceQueueAfterException();
+            if (context.fallbackAttempt() >= 2) {
+                finishFailedRecovery(session, "Alternatif SoundCloud yüklemesi de oynatılamadı.");
+            } else {
+                searchAlternativeSoundCloudTrack(session, failedTrack, context, currentGen);
+            }
             return;
         }
 
@@ -260,6 +265,129 @@ public class MusicPlaybackService {
         });
     }
 
+    private void searchAlternativeSoundCloudTrack(
+            GuildAudioSession session,
+            AudioTrack failedTrack,
+            TrackContext context,
+            long currentGen
+    ) {
+        String title = firstNonBlank(context.title(), failedTrack.getInfo().title, context.originalQuery());
+        String author = firstNonBlank(context.author(), failedTrack.getInfo().author, "");
+        String searchText = (title + " " + author).trim();
+
+        if (searchText.isBlank()) {
+            finishFailedRecovery(session, "Alternatif arama için parça bilgisi bulunamadı.");
+            return;
+        }
+
+        logger.warn("🔄 [Guild: {}] Kalıcı URI tekrar 404 verdi. Alternatif SoundCloud yüklemesi aranıyor: {}",
+                session.getGuildId(), searchText);
+        sendChannelMessage(session.getLastMessageChannel(),
+                "⚠️ Resmî SoundCloud yüklemesi açılamadı; aynı parçanın alternatif yüklemesi aranıyor...");
+
+        audioPlayerManager.getPlayerManager().loadItemOrdered(session, "scsearch:" + searchText, new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                if (!isRecoveryStillCurrent(session, currentGen)) return;
+                AudioTrack alternative = isAlternativeCandidate(track, context) ? track : null;
+                startAlternativeOrAdvance(session, alternative, context);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                if (!isRecoveryStillCurrent(session, currentGen)) return;
+                startAlternativeOrAdvance(session, findAlternativeTrack(playlist.getTracks(), context), context);
+            }
+
+            @Override
+            public void noMatches() {
+                if (!isRecoveryStillCurrent(session, currentGen)) return;
+                finishFailedRecovery(session, "Aynı parçanın çalışabilir alternatif yüklemesi bulunamadı.");
+            }
+
+            @Override
+            public void loadFailed(FriendlyException ex) {
+                if (!isRecoveryStillCurrent(session, currentGen)) return;
+                logger.warn("⚠️ [Guild: {}] Alternatif SoundCloud araması başarısız: {}",
+                        session.getGuildId(), ex.getMessage());
+                finishFailedRecovery(session, "Alternatif SoundCloud araması başarısız oldu.");
+            }
+        });
+    }
+
+    private void startAlternativeOrAdvance(GuildAudioSession session, AudioTrack alternative, TrackContext context) {
+        if (alternative == null) {
+            finishFailedRecovery(session, "Aynı parçanın çalışabilir alternatif yüklemesi bulunamadı.");
+            return;
+        }
+
+        alternative.setUserData(context.markAlternativeResolved());
+        logger.info("✅ [Guild: {}] Alternatif SoundCloud yüklemesi deneniyor: {} | {}",
+                session.getGuildId(), alternative.getInfo().title, sanitizeUri(alternative.getInfo().uri));
+        sendChannelMessage(session.getLastMessageChannel(),
+                "🔄 Alternatif yükleme deneniyor: **" + alternative.getInfo().title + "**");
+        session.getScheduler().startFallbackTrack(alternative);
+    }
+
+    private static AudioTrack findAlternativeTrack(List<AudioTrack> tracks, TrackContext context) {
+        for (AudioTrack track : tracks) {
+            if (isAlternativeCandidate(track, context)) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isAlternativeCandidate(AudioTrack track, TrackContext context) {
+        if (track == null || track.getInfo() == null || AudioPlayerManager.isUnwantedMedia(track.getInfo().title)) {
+            return false;
+        }
+
+        String candidateUri = canonicalUri(track.getInfo().uri);
+        String originalUri = canonicalUri(context.permanentUri());
+        if (candidateUri.isBlank() || candidateUri.equals(originalUri)) {
+            return false;
+        }
+
+        String expectedTitle = normalizeTitle(firstNonBlank(context.title(), context.originalQuery(), ""));
+        String candidateTitle = normalizeTitle(track.getInfo().title);
+        return !expectedTitle.isBlank()
+                && (candidateTitle.contains(expectedTitle) || expectedTitle.contains(candidateTitle));
+    }
+
+    private static boolean isRecoveryStillCurrent(GuildAudioSession session, long generation) {
+        return !session.isDestroyed() && session.getPlaybackGeneration() == generation;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static String normalizeTitle(String value) {
+        if (value == null) return "";
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+        return normalized;
+    }
+
+    private static String canonicalUri(String uri) {
+        if (uri == null || uri.isBlank()) return "";
+        return sanitizeUri(uri).replaceAll("/+$", "").toLowerCase(Locale.ROOT);
+    }
+
+    private void finishFailedRecovery(GuildAudioSession session, String logReason) {
+        logger.warn("⚠️ [Guild: {}] {} Sıradaki parçaya geçiliyor.", session.getGuildId(), logReason);
+        sendChannelMessage(session.getLastMessageChannel(),
+                "❌ SoundCloud bu parçanın ses bağlantısını sağlayamadı. Sıradaki parçaya geçiliyor.");
+        session.getScheduler().advanceQueueAfterException();
+    }
+
     public static void logDetailedException(Logger logger, long guildId, AudioTrack track, FriendlyException exception) {
         TrackContext context = track != null ? (TrackContext) track.getUserData() : null;
 
@@ -273,6 +401,7 @@ public class MusicPlaybackService {
         if (context != null) {
             sb.append("Kaynak Türü           : ").append(context.source()).append("\n");
             sb.append("Re-Resolved Durumu    : ").append(context.isReResolved()).append("\n");
+            sb.append("Kurtarma Denemesi     : ").append(context.fallbackAttempt()).append("\n");
             sb.append("Orijinal Sorgu        : ").append(context.originalQuery()).append("\n");
         }
 
