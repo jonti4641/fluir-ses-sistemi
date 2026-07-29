@@ -46,6 +46,7 @@ public final class WatchPartyService {
     private static final int MAX_YOUTUBE_EMBED_BYTES = 2 * 1024 * 1024;
     private static final int MAX_YOUTUBE_API_BODY = 1024 * 1024;
     private static final int MAX_YOUTUBE_API_RESPONSE = 4 * 1024 * 1024;
+    private static final int MAX_GOOGLEVIDEO_INIT_BODY = 64 * 1024;
     private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
     private static final Pattern HTML_NONCE_ATTRIBUTE = Pattern.compile("(?i)\\snonce=(?:\"[^\"]*\"|'[^']*')");
     private static final Pattern HTML_PLAYER_SCRIPT = Pattern.compile("(?i)(<script\\b[^>]*\\bsrc=\")(/s/[^\"]+)(\")");
@@ -146,13 +147,24 @@ public final class WatchPartyService {
      */
     private void handleGoogleVideo(HttpExchange exchange) throws IOException {
         String method = exchange.getRequestMethod();
-        if (!"GET".equals(method) && !"HEAD".equals(method)) {
+        if (!"GET".equals(method) && !"HEAD".equals(method) && !"POST".equals(method)) {
             sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
             return;
         }
         URI target = googleVideoTarget(exchange.getRequestURI());
         if (target == null) {
             sendJson(exchange, 400, "{\"error\":\"invalid_googlevideo_target\"}");
+            return;
+        }
+        if ("POST".equals(method) && !"/initplayback".equals(target.getPath())) {
+            sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        byte[] requestBody = "POST".equals(method)
+                ? exchange.getRequestBody().readNBytes(MAX_GOOGLEVIDEO_INIT_BODY + 1)
+                : new byte[0];
+        if (requestBody.length > MAX_GOOGLEVIDEO_INIT_BODY) {
+            sendJson(exchange, 413, "{\"error\":\"body_too_large\"}");
             return;
         }
         if (!googleVideoRelays.tryAcquire()) {
@@ -168,8 +180,11 @@ public final class WatchPartyService {
                         .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0");
                 copyAllowedHeader(exchange, builder, "Range");
                 copyAllowedHeader(exchange, builder, "If-Range");
+                copyAllowedHeader(exchange, builder, "Content-Type");
                 HttpResponse<InputStream> response = googleVideo.send(
-                        builder.method(method, HttpRequest.BodyPublishers.noBody()).build(),
+                        builder.method(method, "POST".equals(method)
+                                ? HttpRequest.BodyPublishers.ofByteArray(requestBody)
+                                : HttpRequest.BodyPublishers.noBody()).build(),
                         HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() >= 300 && response.statusCode() < 400) {
                     String location = response.headers().firstValue("Location").orElse("");
