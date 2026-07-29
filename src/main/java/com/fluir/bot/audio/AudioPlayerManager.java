@@ -5,6 +5,7 @@ import com.sedmelluq.discord.lavaplayer.source.bandcamp.BandcampAudioSourceManag
 import com.fluir.bot.config.BotConfig;
 import com.fluir.bot.monitoring.SecureWebhookNotifier;
 import com.fluir.bot.persistence.PersistentStore;
+import com.fluir.bot.watch.WatchPartyService;
 import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
@@ -30,6 +31,7 @@ public class AudioPlayerManager {
     private final PersistentStore store;
     private final BotConfig config;
     private final SecureWebhookNotifier notifier;
+    private final WatchPartyService watchPartyService;
 
     public AudioPlayerManager() {
         this(BotConfig.load(), new PersistentStore(BotConfig.load().dataDirectory()), new SecureWebhookNotifier(""));
@@ -41,6 +43,7 @@ public class AudioPlayerManager {
         this.store = store;
         this.config = config;
         this.notifier = notifier;
+        this.watchPartyService = new WatchPartyService(config.publicBaseUrl());
         this.playbackService = new MusicPlaybackService(this, store, config, notifier);
         registerSources();
     }
@@ -123,4 +126,5 @@ public class AudioPlayerManager {
     public BotConfig getConfig() { return config; }
     public SecureWebhookNotifier getNotifier() { return notifier; }
     public int getSessionCount() { return sessions.size(); }
+    public WatchPartyService getWatchPartyService() { return watchPartyService; }
 }

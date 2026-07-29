@@ -6,6 +6,8 @@
 
 ## ✨ Özellikler
 
+- 🎚️ **Canlı ayrıntılı panel** — 10 saniyede yenilenen zaman çizgisi, yüzde, kalan süre, albüm kapağı, kuyruk özeti ve iki sıra kontrol
+- 🎬 **YouTube Watch Party** — 6 saatlik odalarda ortak oynat/duraklat/seek, katılımcı ve senkron farkı göstergesi
 - 💾 **Kalıcı veriler** — sunucu ayarları, favoriler, geçmiş, çalma listeleri ve kuyruk kurtarma
 - 🎛️ **Düğmeli kontrol paneli** — yalnızca ilk gerçek ses karesinden sonra “çalıyor” duyurusu
 - 🛡️ **Ek güvenlik** — SSRF/LFI koruması, izinli HTTPS alan adları, oran ve kuyruk sınırı
@@ -79,6 +81,10 @@ java -jar target/fluir-ses-sistemi-1.0.0.jar
 4. Kalıcı veriler için Railway Volume bağla; bot `RAILWAY_VOLUME_MOUNT_PATH` yolunu otomatik kullanır (`DATA_DIR` ile geçersiz kılabilirsin)
 5. İstersen `ERROR_WEBHOOK_URL` ve uzun/rastgele bir `HEALTH_METRICS_TOKEN` tanımla
 6. Deploy otomatik başlar; Railway `/health` yanıtını bekler ✅
+
+Ortak izleme için serviste **Public Networking** alan adı oluştur. Railway bu alan adını
+`RAILWAY_PUBLIC_DOMAIN` olarak otomatik sağlar; istenirse `PUBLIC_BASE_URL` değişkeniyle
+başka bir HTTPS alan adı kullanılabilir.
 
 ---
 

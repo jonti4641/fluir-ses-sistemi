@@ -13,7 +13,8 @@ public record BotConfig(
         int port,
         String errorWebhookUrl,
         String healthMetricsToken,
-        int maxQueryLength
+        int maxQueryLength,
+        String publicBaseUrl
 ) {
     public static BotConfig load() {
         Dotenv dotenv = Dotenv.configure().ignoreIfMissing().ignoreIfMalformed().load();
@@ -31,8 +32,9 @@ public record BotConfig(
         if (!webhook.isEmpty() && !isAllowedDiscordWebhook(webhook)) {
             throw new IllegalArgumentException("ERROR_WEBHOOK_URL geçerli bir HTTPS Discord webhook adresi değil.");
         }
+        String publicBaseUrl = resolvePublicBaseUrl(dotenv);
         return new BotConfig(token, dataDir, port, webhook,
-                value("HEALTH_METRICS_TOKEN", dotenv, "").trim(), maxQuery);
+                value("HEALTH_METRICS_TOKEN", dotenv, "").trim(), maxQuery, publicBaseUrl);
     }
 
     public void requireToken() {
@@ -67,6 +69,29 @@ public record BotConfig(
                     && uri.getUserInfo() == null && uri.getFragment() == null;
         } catch (IllegalArgumentException ignored) {
             return false;
+        }
+    }
+
+    private static String resolvePublicBaseUrl(Dotenv dotenv) {
+        String configured = value("PUBLIC_BASE_URL", dotenv, "").trim();
+        if (configured.isBlank()) {
+            String railwayDomain = System.getenv("RAILWAY_PUBLIC_DOMAIN");
+            if (railwayDomain != null && !railwayDomain.isBlank()) configured = "https://" + railwayDomain;
+        }
+        if (configured.isBlank()) return "";
+        try {
+            URI uri = URI.create(configured);
+            boolean localDevelopment = "http".equalsIgnoreCase(uri.getScheme())
+                    && ("localhost".equalsIgnoreCase(uri.getHost()) || "127.0.0.1".equals(uri.getHost()));
+            if (!"https".equalsIgnoreCase(uri.getScheme()) && !localDevelopment) {
+                throw new IllegalArgumentException("PUBLIC_BASE_URL HTTPS olmalıdır.");
+            }
+            if (uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+                throw new IllegalArgumentException("PUBLIC_BASE_URL geçersiz.");
+            }
+            return configured.replaceAll("/+$", "");
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("PUBLIC_BASE_URL geçerli bir HTTPS adresi değil.", e);
         }
     }
 }

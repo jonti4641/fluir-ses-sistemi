@@ -5,6 +5,7 @@ import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.managers.AudioManager;
@@ -46,6 +47,8 @@ public class GuildAudioSession {
     private volatile GuildMessageChannel lastMessageChannel;
     private volatile ScheduledFuture<?> idleTimerTask;
     private volatile ScheduledFuture<?> aloneTimerTask;
+    private volatile ScheduledFuture<?> panelUpdateTask;
+    private volatile Message activePanelMessage;
     private volatile boolean isDestroyed = false;
 
     public GuildAudioSession(long guildId, AudioPlayerManager lavaPlayerManager, MusicPlaybackService playbackService) {
@@ -219,6 +222,7 @@ public class GuildAudioSession {
             this.connectionState = VoiceConnectionState.DISCONNECTING;
             cancelIdleTimer();
             cancelAloneTimer();
+            stopPanelUpdater();
 
             scheduler.stop();
 
@@ -273,9 +277,46 @@ public class GuildAudioSession {
         SoundCloudCircuitBreaker.recordSuccess(guildId, track.getInfo().uri);
         GuildMessageChannel channel = lastMessageChannel;
         if (channel != null && settings().announcements()) {
-            channel.sendMessageEmbeds(NowPlayingPanel.embed(track, this).build())
-                    .setComponents(NowPlayingPanel.controls(this)).queue(null,
-                            err -> logger.warn("Duyuru gönderilemedi [Guild: {}]", guildId));
+            publishOrRefreshPanel(channel, track);
+        }
+    }
+
+    private void publishOrRefreshPanel(GuildMessageChannel channel, AudioTrack track) {
+        Message existing = activePanelMessage;
+        if (existing != null && existing.getChannel().getIdLong() == channel.getIdLong()) {
+            refreshPanelNow();
+            startPanelUpdater();
+            return;
+        }
+        channel.sendMessageEmbeds(NowPlayingPanel.embed(track, this).build())
+                .setComponents(NowPlayingPanel.components(this))
+                .queue(message -> {
+                    activePanelMessage = message;
+                    startPanelUpdater();
+                }, err -> logger.warn("Müzik paneli gönderilemedi [Guild: {}]", guildId));
+    }
+
+    public void refreshPanelNow() {
+        Message panel = activePanelMessage;
+        AudioTrack track = scheduler.getCurrentTrack();
+        if (panel == null || track == null || isDestroyed) return;
+        panel.editMessageEmbeds(NowPlayingPanel.embed(track, this).build())
+                .setComponents(NowPlayingPanel.components(this))
+                .queue(null, err -> {
+                    logger.debug("Müzik paneli artık güncellenemiyor [Guild: {}]", guildId);
+                    stopPanelUpdater();
+                });
+    }
+
+    private synchronized void startPanelUpdater() {
+        stopPanelUpdater();
+        panelUpdateTask = schedulerExecutor.scheduleAtFixedRate(this::refreshPanelNow, 10, 10, TimeUnit.SECONDS);
+    }
+
+    private synchronized void stopPanelUpdater() {
+        if (panelUpdateTask != null) {
+            panelUpdateTask.cancel(false);
+            panelUpdateTask = null;
         }
     }
 

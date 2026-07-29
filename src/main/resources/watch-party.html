@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Fluir Watch Party</title>
+  <style nonce="__NONCE__">
+    :root{--bg:#070914;--card:#101526;--line:#242c44;--cyan:#16e0cf;--blue:#6775ff;--pink:#ff4d91;--text:#f7f8ff;--muted:#9ca8c7}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);background:radial-gradient(circle at 20% 0,#17234c 0,transparent 35%),radial-gradient(circle at 100% 20%,#34173c 0,transparent 30%),var(--bg);font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif}
+    .shell{width:min(1180px,100%);margin:auto;padding:24px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px}.brand{display:flex;gap:12px;align-items:center}.logo{display:grid;place-items:center;width:48px;height:48px;border-radius:15px;background:linear-gradient(135deg,var(--cyan),var(--blue));box-shadow:0 0 35px #16e0cf55;font-size:24px}.brand h1{margin:0;font-size:20px}.brand p{margin:2px 0 0;color:var(--muted)}
+    .live{padding:8px 13px;border:1px solid #ff4d9166;border-radius:999px;background:#ff4d9118;color:#ff91bc;font-weight:800}.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px}.card{background:#101526dd;border:1px solid var(--line);border-radius:20px;box-shadow:0 18px 70px #0007;overflow:hidden}.video{position:relative;aspect-ratio:16/9;background:#000}.video iframe{width:100%;height:100%}
+    .details{padding:18px}.titleline{display:flex;justify-content:space-between;gap:20px}.titleline h2{margin:0;font-size:18px}.sub{color:var(--muted);font-size:13px}.timeline{margin-top:18px}.bar{height:9px;background:#242b43;border-radius:999px;overflow:hidden}.fill{width:0;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));box-shadow:0 0 18px var(--cyan);transition:width .35s linear}.times{display:flex;justify-content:space-between;margin-top:7px;color:#cbd3ed;font-variant-numeric:tabular-nums}
+    .controls{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-top:16px}.controls button{min-height:44px;border:1px solid #303a59;border-radius:12px;background:#192139;color:#fff;font-weight:800;cursor:pointer}.controls button:hover{border-color:var(--cyan);transform:translateY(-1px)}.controls .main{background:linear-gradient(135deg,var(--blue),#8758ff);border:0}
+    aside{display:grid;gap:18px;align-content:start}.panel{padding:18px}.panel h3{margin:0 0 14px}.stat{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line)}.stat:last-child{border:0}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);margin-right:7px}.tip{padding:13px;border-radius:12px;background:#0b1020;color:var(--muted);font-size:13px}.sync{color:var(--cyan);font-weight:800}.danger{color:#ff8eae}
+    @media(max-width:850px){.shell{padding:12px}.grid{grid-template-columns:1fr}.top{align-items:flex-start}.controls{grid-template-columns:repeat(3,1fr)}aside{grid-template-columns:1fr 1fr}}@media(max-width:520px){aside{grid-template-columns:1fr}.brand p{display:none}.controls{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div class="brand"><div class="logo">◉</div><div><h1>Fluir Watch Party</h1><p>YouTube • senkron ortak izleme odası</p></div></div>
+    <div class="live">● LIVE ROOM</div>
+  </header>
+  <section class="grid">
+    <article class="card">
+      <div class="video"><div id="player"></div></div>
+      <div class="details">
+        <div class="titleline"><div><h2 id="videoTitle">Video hazırlanıyor…</h2><div class="sub">Odadaki kontroller tüm katılımcılarla senkronize edilir.</div></div><div id="syncText" class="sync">Bağlanıyor</div></div>
+        <div class="timeline"><div class="bar"><div id="fill" class="fill"></div></div><div class="times"><span id="current">00:00</span><span id="remaining">-00:00</span><span id="duration">00:00</span></div></div>
+        <div class="controls">
+          <button data-seek="-10">⏪ 10 sn</button><button id="play" class="main">▶ Oynat</button><button id="pause">⏸ Duraklat</button><button data-seek="10">10 sn ⏩</button><button id="sync">↻ Eşitle</button>
+        </div>
+      </div>
+    </article>
+    <aside>
+      <section class="card panel"><h3>Oda Durumu</h3><div class="stat"><span><i class="dot"></i>Katılımcılar</span><strong id="participants">1</strong></div><div class="stat"><span>Senkron farkı</span><strong id="drift">0.0 sn</strong></div><div class="stat"><span>Bağlantı</span><strong id="connection">Kuruluyor</strong></div><div class="stat"><span>Oda süresi</span><strong>6 saat</strong></div></section>
+      <section class="card panel"><h3>Güvenli İzleme</h3><p class="tip">Video Fluir sunucusundan aktarılmaz. Her katılımcı videoyu doğrudan resmi YouTube IFrame oynatıcısından alır; bot yalnızca zaman, oynat ve duraklat durumunu eşitler.</p><p class="tip danger">Oda bağlantısına sahip herkes kontrolleri kullanabilir. Bağlantıyı yalnızca izlemesini istediğin kişilerle paylaş.</p></section>
+    </aside>
+  </section>
+</main>
+<script nonce="__NONCE__" src="https://www.youtube.com/iframe_api"></script>
+<script nonce="__NONCE__">
+  const roomId="__ROOM_ID__",videoId="__VIDEO_ID__";
+  let player,ready=false,applying=false,lastRemote=null;
+  const byId=id=>document.getElementById(id);
+  const clock=value=>{value=Math.max(0,Math.floor(value||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h>0?[h,m,s].map((n,i)=>i?String(n).padStart(2,"0"):n).join(":"):[m,s].map(n=>String(n).padStart(2,"0")).join(":")};
+  window.onYouTubeIframeAPIReady=()=>{player=new YT.Player("player",{videoId:videoId,playerVars:{playsinline:1,rel:0,origin:location.origin},events:{onReady:e=>{ready=true;byId("videoTitle").textContent=e.target.getVideoData().title||"YouTube videosu";fetchState()},onStateChange:e=>{if(applying)return;if(e.data===YT.PlayerState.PLAYING)send("play",player.getCurrentTime());if(e.data===YT.PlayerState.PAUSED)send("pause",player.getCurrentTime())}}})};
+  function send(action,position){return fetch("/api/watch/"+roomId+"/control",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"action="+encodeURIComponent(action)+"&position="+encodeURIComponent(position)}).then(r=>{if(!r.ok)throw new Error("control")}).catch(()=>byId("syncText").textContent="Kontrol gönderilemedi")}
+  function expected(state){return state.position+(state.playing?(Date.now()-state.serverTime)/1000:0)}
+  function apply(state){lastRemote=state;byId("participants").textContent=state.participants;byId("connection").textContent="Bağlı";if(!ready)return;const target=expected(state),diff=target-player.getCurrentTime();byId("drift").textContent=Math.abs(diff).toFixed(1)+" sn";if(Math.abs(diff)>1.25)player.seekTo(target,true);applying=true;if(state.playing&&player.getPlayerState()!==YT.PlayerState.PLAYING)player.playVideo();if(!state.playing&&player.getPlayerState()===YT.PlayerState.PLAYING)player.pauseVideo();setTimeout(()=>applying=false,650);byId("syncText").textContent=Math.abs(diff)<1.25?"✓ Senkron":"↻ Eşitlendi"}
+  function fetchState(){fetch("/api/watch/"+roomId+"/state").then(r=>r.json()).then(apply)}
+  const events=new EventSource("/api/watch/"+roomId+"/events");events.addEventListener("state",e=>apply(JSON.parse(e.data)));events.onopen=()=>byId("connection").textContent="Bağlı";events.onerror=()=>byId("connection").textContent="Yeniden bağlanıyor";
+  byId("play").onclick=()=>ready&&send("play",player.getCurrentTime());byId("pause").onclick=()=>ready&&send("pause",player.getCurrentTime());byId("sync").onclick=()=>lastRemote&&apply(lastRemote);document.querySelectorAll("[data-seek]").forEach(b=>b.onclick=()=>{if(!ready)return;const position=Math.max(0,player.getCurrentTime()+Number(b.dataset.seek));player.seekTo(position,true);send("seek",position)});
+  setInterval(()=>{if(!ready)return;const current=player.getCurrentTime()||0,duration=player.getDuration()||0;byId("current").textContent=clock(current);byId("duration").textContent=clock(duration);byId("remaining").textContent="-"+clock(Math.max(0,duration-current));byId("fill").style.width=(duration?Math.min(100,current/duration*100):0)+"%"},500);
+</script>
+</body>
+</html>

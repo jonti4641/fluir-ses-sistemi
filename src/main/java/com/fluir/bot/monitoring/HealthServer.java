@@ -24,6 +24,7 @@ public final class HealthServer implements AutoCloseable {
         server=HttpServer.create(new InetSocketAddress("0.0.0.0",port),16);
         server.createContext("/health",this::health);
         server.createContext("/metrics",this::metrics);
+        audio.getWatchPartyService().register(server);
         server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
         server.start();
     }

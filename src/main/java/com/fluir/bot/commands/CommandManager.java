@@ -15,6 +15,8 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.dv8tion.jda.api.components.buttons.Button;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
@@ -25,6 +27,7 @@ import net.dv8tion.jda.api.Permission;
 import com.fluir.bot.persistence.GuildSettings;
 import com.fluir.bot.persistence.StoredTrack;
 import com.fluir.bot.security.CommandRateLimiter;
+import com.fluir.bot.watch.WatchPartyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +75,8 @@ public class CommandManager extends ListenerAdapter {
         commands.add(Commands.slash("durum", "Bot, veritabanı ve SoundCloud durumunu gösterir"));
         commands.add(Commands.slash("gecmis", "Son çalınan parçaları gösterir"));
         commands.add(Commands.slash("kuyruk-yukle", "Kaydedilmiş kuyruğu geri yükler"));
+        commands.add(Commands.slash("izle", "YouTube için senkron ortak izleme odası açar")
+                .addOption(OptionType.STRING, "youtube", "YouTube video bağlantısı", true));
         commands.add(Commands.slash("favori", "Kişisel favorileri yönetir")
                 .addSubcommands(new SubcommandData("ekle","Çalan parçayı favorilere ekler"),new SubcommandData("liste","Favorileri gösterir"),new SubcommandData("sil","Sıra numarasıyla siler").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true),new SubcommandData("cal","Favoriyi çalar").addOption(OptionType.INTEGER,"sira","Favori sıra numarası",true)));
         commands.add(Commands.slash("liste", "Sunucu çalma listelerini yönetir")
@@ -112,6 +117,7 @@ public class CommandManager extends ListenerAdapter {
                 case "durum"    -> handleStatusSlash(event);
                 case "gecmis"   -> handleHistorySlash(event);
                 case "kuyruk-yukle" -> handleRestoreQueue(event);
+                case "izle"     -> handleWatchParty(event);
                 case "favori"   -> handleFavorite(event);
                 case "liste"    -> handlePlaylist(event);
                 case "ayar"     -> handleSettings(event);
@@ -134,11 +140,16 @@ public class CommandManager extends ListenerAdapter {
         if(!validateControlPermissions(event.getMember(),event.getGuild(),channel,null)){event.reply("❌ Bu kontrol için botla aynı ses kanalında olmalısın.").setEphemeral(true).queue();return;}
         GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());AudioTrack track=s.getScheduler().getCurrentTrack();
         switch(event.getComponentId()){
-            case "music:pause"->{s.getPlayer().setPaused(!s.getPlayer().isPaused());event.reply(s.getPlayer().isPaused()?"⏸️ Duraklatıldı.":"▶️ Devam ediyor.").setEphemeral(true).queue();}
+            case "music:pause"->{s.getPlayer().setPaused(!s.getPlayer().isPaused());s.refreshPanelNow();event.reply(s.getPlayer().isPaused()?"⏸️ Duraklatıldı.":"▶️ Devam ediyor.").setEphemeral(true).queue();}
             case "music:skip"->{s.getScheduler().nextTrack();event.reply("⏭️ Atlandı.").setEphemeral(true).queue();}
             case "music:stop"->{audioPlayerManager.disconnect(event.getGuild());event.reply("⏹️ Durduruldu.").setEphemeral(true).queue();}
-            case "music:loop"->{s.getScheduler().setLoop(!s.getScheduler().isLoop());event.reply("🔁 Döngü "+(s.getScheduler().isLoop()?"açık.":"kapalı.")).setEphemeral(true).queue();}
+            case "music:loop"->{s.getScheduler().setLoop(!s.getScheduler().isLoop());s.refreshPanelNow();event.reply("🔁 Döngü "+(s.getScheduler().isLoop()?"açık.":"kapalı.")).setEphemeral(true).queue();}
             case "music:favorite"->{if(track==null){event.reply("❌ Çalan parça yok.").setEphemeral(true).queue();return;}boolean added=audioPlayerManager.getStore().addFavorite(event.getGuild().getIdLong(),event.getUser().getIdLong(),StoredTrack.from(track));event.reply(added?"❤ Favorilere eklendi.":"ℹ️ Zaten favorilerinde.").setEphemeral(true).queue();}
+            case "music:volume_down"->{int volume=Math.max(0,s.getPlayer().getVolume()-10);s.getPlayer().setVolume(volume);s.refreshPanelNow();event.reply("🔉 Ses **%"+volume+"**.").setEphemeral(true).queue();}
+            case "music:volume_up"->{int volume=Math.min(150,s.getPlayer().getVolume()+10);s.getPlayer().setVolume(volume);s.refreshPanelNow();event.reply("🔊 Ses **%"+volume+"**.").setEphemeral(true).queue();}
+            case "music:rewind"->{if(track==null||!track.isSeekable()){event.reply("❌ Bu parçada geri sarma desteklenmiyor.").setEphemeral(true).queue();return;}track.setPosition(Math.max(0,track.getPosition()-10_000));s.refreshPanelNow();event.reply("⏪ 10 saniye geri sarıldı.").setEphemeral(true).queue();}
+            case "music:forward"->{if(track==null||!track.isSeekable()){event.reply("❌ Bu parçada ileri sarma desteklenmiyor.").setEphemeral(true).queue();return;}track.setPosition(Math.min(track.getDuration(),track.getPosition()+10_000));s.refreshPanelNow();event.reply("⏩ 10 saniye ileri sarıldı.").setEphemeral(true).queue();}
+            case "music:shuffle"->{int count=s.getScheduler().shuffleQueue();s.refreshPanelNow();event.reply("🔀 Kuyruktaki **"+count+"** parça karıştırıldı.").setEphemeral(true).queue();}
         }
     }
 
@@ -480,7 +491,38 @@ public class CommandManager extends ListenerAdapter {
     private void handlePanelSlash(SlashCommandInteractionEvent event){
         GuildAudioSession s=audioPlayerManager.getOrCreateSession(event.getGuild());AudioTrack track=s.getScheduler().getCurrentTrack();
         if(track==null){event.reply("❌ Şu an çalan parça yok.").setEphemeral(true).queue();return;}
-        event.replyEmbeds(NowPlayingPanel.embed(track,s).build()).addComponents(NowPlayingPanel.controls(s)).queue();
+        event.replyEmbeds(NowPlayingPanel.embed(track,s).build()).addComponents(NowPlayingPanel.components(s)).queue();
+    }
+
+    private void handleWatchParty(SlashCommandInteractionEvent event) {
+        WatchPartyService service = audioPlayerManager.getWatchPartyService();
+        if (!service.isAvailable()) {
+            event.reply("❌ Ortak izleme için Railway Public Domain veya PUBLIC_BASE_URL ayarlanmalı.")
+                    .setEphemeral(true).queue();
+            return;
+        }
+        String youtubeUrl = event.getOption("youtube").getAsString();
+        try {
+            WatchPartyService.WatchRoom room = service.createRoom(youtubeUrl, event.getUser().getIdLong());
+            EmbedBuilder embed = new EmbedBuilder()
+                    .setTitle("🎬 Fluir Ortak İzleme Odası")
+                    .setDescription("YouTube videosu için **6 saatlik senkron oda** hazırlandı.\n\n"
+                            + "• Oynat, duraklat ve ±10 saniye kontrolleri herkeste eşitlenir.\n"
+                            + "• Katılımcı, zaman farkı ve bağlantı durumu canlı gösterilir.\n"
+                            + "• Video bot üzerinden aktarılmaz; resmî YouTube oynatıcısı kullanılır.")
+                    .addField("Oda", room.id().substring(0, 8), true)
+                    .addField("Video ID", room.videoId(), true)
+                    .addField("Güvenlik", "Bağlantıya sahip kişiler katılabilir", false)
+                    .setThumbnail("https://i.ytimg.com/vi/" + room.videoId() + "/hqdefault.jpg")
+                    .setColor(new Color(0, 210, 190));
+            event.replyEmbeds(embed.build())
+                    .addComponents(ActionRow.of(Button.link(room.url(), "🎬 Ortak İzlemeyi Aç")))
+                    .queue();
+        } catch (IllegalArgumentException e) {
+            event.reply("❌ Geçerli bir YouTube video bağlantısı gir.").setEphemeral(true).queue();
+        } catch (IllegalStateException e) {
+            event.reply("❌ Şu anda yeni izleme odası oluşturulamıyor.").setEphemeral(true).queue();
+        }
     }
 
     private void handleStatusSlash(SlashCommandInteractionEvent event){
