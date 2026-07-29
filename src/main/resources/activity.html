@@ -38,14 +38,13 @@
   </section>
 </main>
 <script src="/assets/discord-sdk.js"></script>
-<script src="/youtube/iframe_api"></script>
 <script nonce="__NONCE__">
   const clientId="__DISCORD_CLIENT_ID__";
   const byId=id=>document.getElementById(id);
-  let discordSdk,roomId,videoId,player,playerReady=false,youtubeReady=false,lastRemote=null,applying=false,events;
+  const PLAYING=1,PAUSED=2;
+  let discordSdk,roomId,videoId,playerFrame,playerReady=false,playerState=-1,playerCurrent=0,playerDuration=0,lastRemote=null,applying=false,events;
   const clock=value=>{value=Math.max(0,Math.floor(value||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h>0?[h,m,s].map((n,i)=>i?String(n).padStart(2,"0"):n).join(":"):[m,s].map(n=>String(n).padStart(2,"0")).join(":")};
   const fail=(title,detail)=>{byId("loadingTitle").textContent=title;byId("loadingDetail").textContent=detail;byId("loadingDetail").classList.add("error");byId("connection").textContent="Hata";byId("syncText").textContent="Bağlanamadı"};
-  window.onYouTubeIframeAPIReady=()=>{youtubeReady=true;maybeCreatePlayer()};
   async function boot(){
     try{
       if(!window.DiscordEmbeddedAppSDK?.DiscordSDK)throw new Error("SDK yüklenemedi");
@@ -60,18 +59,46 @@
     }catch(error){fail("Activity başlatılamadı",error.message||"Bilinmeyen hata")}
   }
   function maybeCreatePlayer(){
-    if(!youtubeReady||!videoId||player)return;
-    const proxyHost=location.origin+"/youtube";
-    player=new YT.Player("player",{host:proxyHost,videoId,playerVars:{playsinline:1,rel:0,controls:0,origin:location.origin},events:{onReady:e=>{playerReady=true;byId("loading").classList.add("hidden");byId("videoTitle").textContent=e.target.getVideoData().title||"YouTube videosu";fetchState()},onStateChange:e=>{if(applying)return;if(e.data===YT.PlayerState.PLAYING)send("play",player.getCurrentTime());if(e.data===YT.PlayerState.PAUSED)send("pause",player.getCurrentTime())},onError:e=>fail("YouTube videosu açılamadı","Oynatıcı hata kodu: "+e.data)}});
+    if(!videoId||playerFrame)return;
+    playerFrame=document.createElement("iframe");
+    playerFrame.id="youtube-player";
+    playerFrame.title="YouTube video oynatıcı";
+    playerFrame.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";
+    playerFrame.allowFullscreen=true;
+    playerFrame.src="/youtube/embed/"+encodeURIComponent(videoId)+"?enablejsapi=1&playsinline=1&rel=0&controls=0&origin="+encodeURIComponent(location.origin);
+    playerFrame.onload=()=>{announceListener();setTimeout(announceListener,350);setTimeout(announceListener,1000)};
+    byId("player").appendChild(playerFrame);
   }
+  function playerCommand(func,args=[]){if(playerFrame?.contentWindow)playerFrame.contentWindow.postMessage(JSON.stringify({event:"command",func,args,id:"youtube-player"}),location.origin)}
+  function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),location.origin);playerCommand("addEventListener",["onReady"]);playerCommand("addEventListener",["onStateChange"]);playerCommand("addEventListener",["onError"])}
+  window.addEventListener("message",event=>{
+    if(!playerFrame||event.source!==playerFrame.contentWindow)return;
+    let message;try{message=typeof event.data==="string"?JSON.parse(event.data):event.data}catch{return}
+    if(!message||typeof message!=="object")return;
+    if(message.event==="onReady"){playerReady=true;byId("loading").classList.add("hidden");fetchState();return}
+    if(message.event==="onError"){fail("YouTube videosu açılamadı","Oynatıcı hata kodu: "+message.info);return}
+    if(message.event==="onStateChange"){
+      playerState=Number(message.info);
+      if(!applying&&playerState===PLAYING)send("play",playerCurrent);
+      if(!applying&&playerState===PAUSED)send("pause",playerCurrent);
+      return;
+    }
+    if(message.event==="infoDelivery"&&message.info){
+      if(Number.isFinite(message.info.currentTime))playerCurrent=message.info.currentTime;
+      if(Number.isFinite(message.info.duration))playerDuration=message.info.duration;
+      if(message.info.playerState!==undefined)playerState=Number(message.info.playerState);
+      const title=message.info.videoData?.title;if(title)byId("videoTitle").textContent=title;
+    }
+  });
   function connectEvents(){events=new EventSource("/api/watch/"+roomId+"/events");events.addEventListener("state",event=>apply(JSON.parse(event.data)));events.onopen=()=>byId("connection").textContent="Bağlı";events.onerror=()=>byId("connection").textContent="Yeniden bağlanıyor"}
   function expected(state){return state.position+(state.playing?(Date.now()-state.serverTime)/1000:0)}
-  function apply(state){lastRemote=state;byId("participants").textContent=state.participants;if(!playerReady)return;const target=expected(state),diff=target-player.getCurrentTime();byId("drift").textContent=Math.abs(diff).toFixed(1)+" sn";applying=true;if(Math.abs(diff)>1.25)player.seekTo(target,true);if(state.playing&&player.getPlayerState()!==YT.PlayerState.PLAYING)player.playVideo();if(!state.playing&&player.getPlayerState()===YT.PlayerState.PLAYING)player.pauseVideo();setTimeout(()=>applying=false,700);byId("syncText").textContent=Math.abs(diff)<1.25?"✓ Senkron":"↻ Eşitlendi"}
+  function apply(state){lastRemote=state;byId("participants").textContent=state.participants;if(!playerReady)return;const target=expected(state),diff=target-playerCurrent;byId("drift").textContent=Math.abs(diff).toFixed(1)+" sn";applying=true;if(Math.abs(diff)>1.25)playerCommand("seekTo",[target,true]);if(state.playing&&playerState!==PLAYING)playerCommand("playVideo");if(!state.playing&&playerState===PLAYING)playerCommand("pauseVideo");setTimeout(()=>applying=false,700);byId("syncText").textContent=Math.abs(diff)<1.25?"✓ Senkron":"↻ Eşitlendi"}
   function send(action,position){if(!roomId)return Promise.resolve();return fetch("/api/watch/"+roomId+"/control",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"action="+encodeURIComponent(action)+"&position="+encodeURIComponent(position)}).then(r=>{if(!r.ok)throw new Error()}).catch(()=>byId("syncText").textContent="Kontrol gönderilemedi")}
   function fetchState(){fetch("/api/watch/"+roomId+"/state").then(r=>r.json()).then(apply)}
-  byId("play").onclick=()=>playerReady&&send("play",player.getCurrentTime());byId("pause").onclick=()=>playerReady&&send("pause",player.getCurrentTime());byId("sync").onclick=()=>lastRemote&&apply(lastRemote);document.querySelectorAll("[data-seek]").forEach(button=>button.onclick=()=>{if(!playerReady)return;const position=Math.max(0,player.getCurrentTime()+Number(button.dataset.seek));player.seekTo(position,true);send("seek",position)});
-  setInterval(()=>{if(!playerReady)return;const current=player.getCurrentTime()||0,duration=player.getDuration()||0;byId("current").textContent=clock(current);byId("duration").textContent=clock(duration);byId("remaining").textContent="-"+clock(Math.max(0,duration-current));byId("fill").style.width=(duration?Math.min(100,current/duration*100):0)+"%"},500);
+  byId("play").onclick=()=>playerReady&&send("play",playerCurrent);byId("pause").onclick=()=>playerReady&&send("pause",playerCurrent);byId("sync").onclick=()=>lastRemote&&apply(lastRemote);document.querySelectorAll("[data-seek]").forEach(button=>button.onclick=()=>{if(!playerReady)return;const position=Math.max(0,playerCurrent+Number(button.dataset.seek));playerCommand("seekTo",[position,true]);send("seek",position)});
+  setInterval(()=>{if(!playerReady)return;byId("current").textContent=clock(playerCurrent);byId("duration").textContent=clock(playerDuration);byId("remaining").textContent="-"+clock(Math.max(0,playerDuration-playerCurrent));byId("fill").style.width=(playerDuration?Math.min(100,playerCurrent/playerDuration*100):0)+"%"},500);
   boot();
 </script>
 </body>
 </html>
+
