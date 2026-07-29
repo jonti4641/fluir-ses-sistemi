@@ -178,10 +178,17 @@ public final class WatchPartyService {
                         .timeout(Duration.ofSeconds(25))
                         .header("Accept", exchange.getRequestHeaders().getFirst("Accept") == null
                                 ? "*/*" : exchange.getRequestHeaders().getFirst("Accept"))
-                        .header("User-Agent", "Mozilla/5.0 FluirDiscordActivity/1.0");
+                        .header("Origin", "https://www.youtube.com")
+                        .header("Referer", "https://www.youtube.com/")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36");
                 copyAllowedHeader(exchange, builder, "Range");
                 copyAllowedHeader(exchange, builder, "If-Range");
                 copyAllowedHeader(exchange, builder, "Content-Type");
+                copyAllowedHeader(exchange, builder, "Content-Encoding");
+                copyAllowedHeader(exchange, builder, "X-Goog-Visitor-Id");
+                copyAllowedHeader(exchange, builder, "X-YouTube-Client-Name");
+                copyAllowedHeader(exchange, builder, "X-YouTube-Client-Version");
+                copyAllowedHeader(exchange, builder, "X-Goog-Api-Format-Version");
                 HttpResponse<InputStream> response = googleVideo.send(
                         builder.method(method, "POST".equals(method)
                                 ? HttpRequest.BodyPublishers.ofByteArray(requestBody)
