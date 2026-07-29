@@ -52,7 +52,7 @@
 <script src="/assets/discord-sdk.js"></script>
 <script nonce="__NONCE__">
   const clientId="__DISCORD_CLIENT_ID__",byId=id=>document.getElementById(id),PLAYING=1,PAUSED=2;
-  let discordSdk,roomId,videoId="",playerFrame,playerReady=false,playerState=-1,playerCurrent=0,playerDuration=0,lastRemote,events,controller=false,applying=false,muted=false,hideTimer,seeking=false;
+  let discordSdk,roomId,videoId="",playerFrame,playerReady=false,playerState=-1,playerCurrent=0,playerDuration=0,lastRemote,events,controller=false,applying=false,muted=false,hideTimer,playbackWatchdog,seeking=false;
   const clock=value=>{value=Math.max(0,Math.floor(value||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h?[h,m,s].map((n,i)=>i?String(n).padStart(2,"0"):n).join(":"):[m,s].map(n=>String(n).padStart(2,"0")).join(":")};
   const showControls=()=>{byId("stage").classList.add("controls-visible");clearTimeout(hideTimer);hideTimer=setTimeout(()=>byId("stage").classList.remove("controls-visible"),2800)};
   const fail=(title,detail)=>{byId("loading").classList.remove("hidden");byId("loadingTitle").textContent=title;byId("loadingDetail").textContent=detail;byId("loadingDetail").classList.add("error");byId("status").textContent="Bağlantı hatası"};
@@ -86,6 +86,7 @@
     if(controller)setTimeout(()=>byId("sourceUrl").focus(),60);
   }
   function createPlayer(id){
+    clearTimeout(playbackWatchdog);
     videoId=id;playerReady=false;playerState=-1;playerCurrent=0;playerDuration=0;byId("sourceGate").classList.add("hidden");
     byId("loading").classList.remove("hidden");byId("loadingTitle").textContent="Video açılıyor…";byId("loadingDetail").textContent="YouTube güvenli Discord proxy’si üzerinden yükleniyor.";byId("loadingDetail").classList.remove("error");
     byId("player").replaceChildren();playerFrame=document.createElement("iframe");playerFrame.id="youtube-player";playerFrame.title="Fluir video yayını";
@@ -96,19 +97,20 @@
     byId("player").appendChild(playerFrame);
   }
   function playerCommand(func,args=[]){if(playerFrame?.contentWindow)playerFrame.contentWindow.postMessage(JSON.stringify({event:"command",func,args,id:"youtube-player"}),"*")}
+  function armPlaybackWatchdog(){clearTimeout(playbackWatchdog);playbackWatchdog=setTimeout(()=>{if(playerState!==PLAYING&&playerDuration<=0)fail("Video akışı başlatılamadı","YouTube bu videoyu Discord Activity içinde aktarmadı. Yerleştirmeye açık başka bir video dene.")},12000)}
   function announceListener(){if(!playerFrame?.contentWindow)return;playerFrame.contentWindow.postMessage(JSON.stringify({event:"listening",id:"youtube-player"}),"*");["onReady","onStateChange","onError","onApiChange"].forEach(name=>playerCommand("addEventListener",[name]))}
   window.addEventListener("message",event=>{
     if(!playerFrame||event.source!==playerFrame.contentWindow)return;let message;try{message=typeof event.data==="string"?JSON.parse(event.data):event.data}catch{return}if(!message||typeof message!=="object")return;
     if(message.event==="onReady"){playerReady=true;byId("loading").classList.add("hidden");fetchState();return}
     if(message.event==="onError"){const code=Number(message.info),detail=code===101||code===150?"Video sahibi başka sitelerde oynatmaya izin vermiyor.":code===153?"YouTube oynatıcı kimliği doğrulanamadı; başka bir video dene.":"YouTube hata kodu: "+code;fail("Video açılamadı",detail);return}
-    if(message.event==="onStateChange"){playerState=Number(message.info);byId("play").textContent=playerState===PLAYING?"❚❚":"▶";if(controller&&!applying){if(playerState===PLAYING)sendControl("play",playerCurrent);if(playerState===PAUSED)sendControl("pause",playerCurrent)}return}
-    if(message.event==="infoDelivery"&&message.info){if(Number.isFinite(message.info.currentTime))playerCurrent=message.info.currentTime;if(Number.isFinite(message.info.duration))playerDuration=message.info.duration;if(message.info.playerState!==undefined)playerState=Number(message.info.playerState)}
+    if(message.event==="onStateChange"){playerState=Number(message.info);if(playerState===PLAYING)clearTimeout(playbackWatchdog);byId("play").textContent=playerState===PLAYING?"❚❚":"▶";if(controller&&!applying){if(playerState===PLAYING)sendControl("play",playerCurrent);if(playerState===PAUSED)sendControl("pause",playerCurrent)}return}
+    if(message.event==="infoDelivery"&&message.info){if(Number.isFinite(message.info.currentTime))playerCurrent=message.info.currentTime;if(Number.isFinite(message.info.duration))playerDuration=message.info.duration;if(playerDuration>0||playerCurrent>0)clearTimeout(playbackWatchdog);if(message.info.playerState!==undefined)playerState=Number(message.info.playerState)}
   });
   function connectEvents(){events=new EventSource("/api/watch/"+roomId+"/events");events.addEventListener("state",event=>apply(JSON.parse(event.data)));events.onopen=()=>byId("status").textContent="Canlı · güvenli bağlantı";events.onerror=()=>byId("status").textContent="Yeniden bağlanıyor…"}
   function expected(state){return state.position+(state.playing?(Date.now()-state.serverTime)/1000:0)}
   function apply(state){
     lastRemote=state;if(!state.videoId){showSourceGate();return}if(state.videoId!==videoId){createPlayer(state.videoId);return}if(!playerReady)return;
-    const target=expected(state),diff=target-playerCurrent;applying=true;if(Math.abs(diff)>1.4)playerCommand("seekTo",[target,true]);if(state.playing&&playerState!==PLAYING)playerCommand("playVideo");if(!state.playing&&playerState===PLAYING)playerCommand("pauseVideo");setTimeout(()=>applying=false,650);
+    const target=expected(state),diff=target-playerCurrent;applying=true;if(Math.abs(diff)>1.4)playerCommand("seekTo",[target,true]);if(state.playing&&playerState!==PLAYING){playerCommand("playVideo");armPlaybackWatchdog()}if(!state.playing&&playerState===PLAYING)playerCommand("pauseVideo");setTimeout(()=>applying=false,650);
   }
   async function sendControl(action,position=0,source=""){
     if(!controller||!roomId)return false;const body=new URLSearchParams({action,position:String(position)});if(source)body.set("source",source);

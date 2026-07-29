@@ -83,7 +83,6 @@ public final class WatchPartyService {
         server.createContext("/api/activity", this::handleActivityApi);
         server.createContext("/assets/discord-sdk.js", this::handleDiscordSdk);
         server.createContext("/youtube-embed/", this::handleYouTubeEmbed);
-        server.createContext("/youtubei/", this::handleYouTubeApi);
         server.createContext("/s/", this::handleYouTubeAsset);
         server.createContext("/yts/", this::handleYouTubeAsset);
         server.createContext("/", this::handleActivityPage);
