@@ -18,7 +18,7 @@
         <jda.version>6.5.0</jda.version>
         <lavaplayer.version>2.2.7</lavaplayer.version>
         <jdave.version>0.1.8</jdave.version>
-        <junit.version>5.10.2</junit.version>
+        <junit.version>6.1.2</junit.version>
         <mockito.version>5.23.0</mockito.version>
         <sqlite.version>3.53.2.0</sqlite.version>
         <logback.version>1.5.32</logback.version>
