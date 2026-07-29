@@ -47,6 +47,40 @@ public final class WatchPartyService {
     private static final long MAX_YOUTUBE_ASSET_BYTES = 8L * 1024 * 1024;
     private static final Pattern HTML_NONCE_ATTRIBUTE = Pattern.compile("(?i)\\snonce=(?:\"[^\"]*\"|'[^']*')");
     private static final Pattern HTML_PLAYER_SCRIPT = Pattern.compile("(?i)(<script\\b[^>]*\\bsrc=\")(/s/[^\"]+)(\")");
+    private static final String YOUTUBE_PROXY_BOOTSTRAP = """
+            <script src="/assets/discord-sdk.js"></script>
+            <script>
+            (()=>{
+              const mappings=[
+                {prefix:"/youtube",target:"www.youtube.com"},
+                {prefix:"/googlevideo/{subdomain}",target:"{subdomain}.googlevideo.com"}
+              ];
+              window.DiscordEmbeddedAppSDK?.patchUrlMappings?.(mappings);
+              const suffix=".googlevideo.com";
+              const remap=value=>{
+                try{
+                  const url=new URL(String(value),location.href);
+                  if(url.protocol!=="https:"||!url.hostname.endsWith(suffix))return value;
+                  const subdomain=url.hostname.slice(0,-suffix.length);
+                  if(!/^[a-z0-9-]{1,180}$/i.test(subdomain))return value;
+                  return location.origin+"/googlevideo/"+subdomain+url.pathname+url.search+url.hash;
+                }catch{return value}
+              };
+              const patchSrc=prototype=>{
+                const descriptor=Object.getOwnPropertyDescriptor(prototype,"src");
+                if(!descriptor?.get||!descriptor?.set)return;
+                Object.defineProperty(prototype,"src",{...descriptor,set(value){descriptor.set.call(this,remap(value))}});
+              };
+              patchSrc(HTMLMediaElement.prototype);
+              if(window.HTMLSourceElement)patchSrc(HTMLSourceElement.prototype);
+              const originalSetAttribute=Element.prototype.setAttribute;
+              Element.prototype.setAttribute=function(name,value){
+                if(String(name).toLowerCase()==="src"&&(this instanceof HTMLMediaElement||(window.HTMLSourceElement&&this instanceof HTMLSourceElement)))value=remap(value);
+                return originalSetAttribute.call(this,name,value);
+              };
+            })();
+            </script>
+            """;
     private static final String CONTROL_COOKIE = "__Host-FluirControl";
 
     private final String publicBaseUrl;
@@ -221,8 +255,7 @@ public final class WatchPartyService {
                 sendJson(exchange, 502, "{\"error\":\"youtube_embed_too_large\"}");
                 return;
             }
-            String normalized = HTML_NONCE_ATTRIBUTE.matcher(new String(raw, StandardCharsets.UTF_8)).replaceAll("");
-            normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=api-route-1$3");
+            String normalized = normalizeYouTubeEmbedHtml(new String(raw, StandardCharsets.UTF_8));
             byte[] body = normalized.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
@@ -243,6 +276,14 @@ public final class WatchPartyService {
             logger.warn("YouTube embed sayfası alınamadı: {}", e.getClass().getSimpleName());
             if (exchange.getResponseCode() < 0) sendJson(exchange, 502, "{\"error\":\"youtube_embed_unavailable\"}");
         }
+    }
+
+    static String normalizeYouTubeEmbedHtml(String html) {
+        String normalized = HTML_NONCE_ATTRIBUTE.matcher(html == null ? "" : html).replaceAll("");
+        normalized = HTML_PLAYER_SCRIPT.matcher(normalized).replaceAll("$1$2?fluir=proxy-route-2$3");
+        int head = normalized.toLowerCase().indexOf("<head>");
+        if (head >= 0) normalized = normalized.substring(0, head + 6) + YOUTUBE_PROXY_BOOTSTRAP + normalized.substring(head + 6);
+        return normalized;
     }
 
     public void configureApplication(String applicationId) {

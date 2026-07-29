@@ -8,6 +8,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ActivityLaunchServiceTest {
     @Test
+    void youtubeEmbedNormalizerInstallsOnlyFixedDiscordMappings() {
+        String html = "<html><head></head><body><script nonce=\"old\" src=\"/s/player/base.js\"></script></body></html>";
+
+        String normalized = WatchPartyService.normalizeYouTubeEmbedHtml(html);
+
+        assertFalse(normalized.contains("nonce=\"old\""));
+        assertTrue(normalized.contains("/s/player/base.js?fluir=proxy-route-2"));
+        assertTrue(normalized.contains("/googlevideo/{subdomain}"));
+        assertTrue(normalized.contains("{subdomain}.googlevideo.com"));
+        assertTrue(normalized.contains("patchUrlMappings"));
+        assertFalse(normalized.contains("http://"));
+    }
+
+    @Test
     void launchCallbackUsesOfficialInteractionEndpointAndPost() {
         HttpRequest request = ActivityLaunchService.callbackRequest(
                 123456789012345678L, "abcdefghij.ABCDEFGHIJ_1234567890");

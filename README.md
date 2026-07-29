@@ -90,7 +90,8 @@ başka bir HTTPS alan adı kullanılabilir.
 
 1. Discord Developer Portal'da bot uygulamasını açıp **Activities → Settings → Enable Activities** seçeneğini etkinleştir.
 2. Railway Public Networking ile oluşan alan adını kopyala (ör. `fluir-production.up.railway.app`).
-3. **Activities → URL Mappings** altında, aşağıdaki sırayla iki eşleme ekle:
+3. **Activities → URL Mappings** altında, aşağıdaki sırayla üç eşleme ekle:
+   - `/googlevideo/{subdomain}` → `{subdomain}.googlevideo.com`
    - `/youtube` → `www.youtube.com`
    - `/` → Railway alan adı (yalnızca alan adı; `https://` ekleme)
 4. Desktop ve Mobile destek platformlarını etkinleştir. Test hesabında Discord Developer Mode açık olmalı.
