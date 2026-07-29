@@ -1,6 +1,6 @@
 # 🎵 Fluir Ses Sistemi
 
-> **Güçlü Discord ses botu** — JDA 5.2.1 + LavaPlayer (SoundCloud) ile geliştirilmiştir.
+> **Güçlü Discord ses botu** — JDA 6.5 + DAVE + LavaPlayer 2.2.7 (SoundCloud) ile geliştirilmiştir.
 
 ---
 
@@ -99,9 +99,9 @@ fluir-ses-sistemi/
 
 ## 🛠️ Teknolojiler
 
-- **Java 17**
-- **JDA 5.2.1** — Java Discord API
-- **LavaPlayer 2.2.2** — Ses motoru (SoundCloud)
+- **Java 25**
+- **JDA 6.5.0 + JDAVE 0.1.8** — Discord API ve ses şifreleme desteği
+- **LavaPlayer 2.2.7** — Ses motoru (SoundCloud)
 - **Maven** — Bağımlılık yönetimi
 - **Docker** — Railway deployment
 - **Logback** — Loglama
@@ -117,4 +117,4 @@ fluir-ses-sistemi/
 
 ---
 
-*Fluir Ses Sistemi — JDA 5.2.1 + LavaPlayer (SoundCloud)*
+*Fluir Ses Sistemi — JDA 6.5 + DAVE + LavaPlayer 2.2.7 (SoundCloud)*

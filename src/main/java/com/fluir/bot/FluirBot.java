@@ -1,11 +1,13 @@
 package com.fluir.bot;
 
+import club.minnced.discord.jdave.interop.JDaveSessionFactory;
 import com.fluir.bot.audio.AudioPlayerManager;
 import com.fluir.bot.audio.VoiceUpdateListener;
 import com.fluir.bot.commands.CommandManager;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.audio.AudioModuleConfig;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
@@ -39,6 +41,8 @@ public class FluirBot {
             VoiceUpdateListener voiceUpdateListener = new VoiceUpdateListener(audioPlayerManager);
 
             jda = JDABuilder.createDefault(token)
+                    .setAudioModuleConfig(new AudioModuleConfig()
+                            .withDaveSessionFactory(new JDaveSessionFactory()))
                     .setActivity(Activity.listening("🎵 /yardim"))
                     .enableIntents(
                             GatewayIntent.GUILD_MESSAGES,

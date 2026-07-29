@@ -116,7 +116,10 @@ public class TrackScheduler extends AudioEventAdapter {
     public void advanceQueueAfterException() {
         schedulerLock.lock();
         try {
-            nextTrack();
+            boolean hasNext = nextTrack();
+            if (!hasNext && queue.isEmpty()) {
+                scheduleIdleDisconnect();
+            }
         } finally {
             schedulerLock.unlock();
         }
@@ -153,6 +156,14 @@ public class TrackScheduler extends AudioEventAdapter {
                 return;
             }
 
+            // Fallback/skip yeni bir parça başlattıysa eski parçanın gecikmiş end olayı
+            // yeni kuyruğu ilerletmemelidir.
+            if (track != currentTrack) {
+                logger.debug("[Guild: {}] Eski track end olayı yok sayıldı: {} ({})",
+                        session.getGuildId(), track.getInfo().title, endReason);
+                return;
+            }
+
             // Exception handler tarafından hallediliyorsa es geç
             if (isHandlingException.getAndSet(false)) {
                 logger.debug("Exception handler tarafından işleniyor, onTrackEnd es geçildi.");
@@ -171,14 +182,18 @@ public class TrackScheduler extends AudioEventAdapter {
             if (endReason.mayStartNext) {
                 boolean hasNext = nextTrack();
                 if (!hasNext && queue.isEmpty()) {
-                    GuildMessageChannel messageChannel = session.getLastMessageChannel();
-                    Guild guild = messageChannel != null ? messageChannel.getGuild() : null;
-                    session.scheduleIdleTimer(guild, 90);
+                    scheduleIdleDisconnect();
                 }
             }
         } finally {
             schedulerLock.unlock();
         }
+    }
+
+    private void scheduleIdleDisconnect() {
+        GuildMessageChannel messageChannel = session.getLastMessageChannel();
+        Guild guild = messageChannel != null ? messageChannel.getGuild() : null;
+        session.scheduleIdleTimer(guild, 90);
     }
 
     @Override
