@@ -156,7 +156,8 @@ public final class WatchPartyService {
             sendJson(exchange, 400, "{\"error\":\"invalid_googlevideo_target\"}");
             return;
         }
-        if ("POST".equals(method) && !"/initplayback".equals(target.getPath())) {
+        if ("POST".equals(method) && !("/initplayback".equals(target.getPath())
+                || "/videoplayback".equals(target.getPath()))) {
             sendJson(exchange, 405, "{\"error\":\"method_not_allowed\"}");
             return;
         }
